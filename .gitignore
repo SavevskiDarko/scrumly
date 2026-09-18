@@ -1,0 +1,23 @@
+# Dependencies — restored with `npm install`
+node_modules/
+
+# Build output — produced by `npm run build` and `npm run build:single`
+dist/
+dist-single/
+
+# Local backup folder, if you point Scrumly's Local folder setting at the repo.
+# Remove these two lines if you actually want your data versioned here — that is
+# a reasonable thing to want, but it should be a deliberate choice rather than
+# something that happens because a setting pointed somewhere.
+scrumly.json
+history/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Claude Code: launch.json is shared, per-machine settings are not
+.claude/settings.local.json

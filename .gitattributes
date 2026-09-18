@@ -1,0 +1,4 @@
+# Keep LF in the repository and in the working tree on every platform, so a
+# checkout on Windows does not rewrite every line and show whole files as
+# changed the next time someone looks at a diff.
+* text=auto eol=lf
