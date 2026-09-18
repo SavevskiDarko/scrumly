@@ -5,12 +5,22 @@ node_modules/
 dist/
 dist-single/
 
-# Local backup folder, if you point Scrumly's Local folder setting at the repo.
-# Remove these two lines if you actually want your data versioned here — that is
-# a reasonable thing to want, but it should be a deliberate choice rather than
-# something that happens because a setting pointed somewhere.
-scrumly.json
-history/
+# Scrumly's own data is deliberately NOT ignored.
+#
+# Point the Local folder setting at this repo and scrumly.json, plus the dated
+# files under history/, are versioned along with the code. Every task, sprint
+# and blocker then has a full history, and `git log` answers "when did this
+# change" for the data as well as for the app.
+#
+# Two things to know before relying on that:
+#
+#   - Notes are in there, including one-to-one notes marked private. Git history
+#     is permanent, so anyone you ever add to this repo can read them, and making
+#     the repo public would expose them. Keep it private, or keep the folder
+#     somewhere else.
+#   - Nothing commits automatically. The file is rewritten seconds after any
+#     change, so the working tree will usually show it as modified; committing
+#     is still yours to do.
 
 # Editor and OS noise
 .DS_Store
@@ -19,5 +29,6 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Claude Code: launch.json is shared, per-machine settings are not
-.claude/settings.local.json
+# Claude Code's local tooling config. Kept on disk so the dev server still
+# starts from here, just not carried in the repo.
+.claude/
