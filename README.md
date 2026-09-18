@@ -208,6 +208,28 @@ This needs the File System Access API, which is Chrome and Edge. Firefox
 and Safari get the panel explaining so, and the manual export below it
 still works; nothing else about the app differs.
 
+### Keeping the data in this repo
+
+Point the Local folder at the repository itself and `scrumly.json` and
+`history/` land beside the code. Neither is ignored, so they can be
+committed like anything else:
+
+    npm run save              commit the data and push
+    npm run save -- --no-push commit only
+
+The autosave writes the file; nothing commits it, which is why that
+script exists. It stages whatever Scrumly wrote, works whether the folder
+points at the repo root or a `data/` folder inside it, names the commit
+after what is in the file — `Data: 24 tasks, 3 sprints, 2 open blockers`
+— and says so and stops when nothing has changed. If the push fails the
+commit is still made, so the data is never left only in the working tree.
+
+One thing to be deliberate about: notes go into that file, including
+one-to-one notes marked private, and git history is permanent. Anyone
+ever added to this repository can read all of it, and making the
+repository public would publish it. Keep it private, or point the folder
+somewhere outside the repository and keep the two concerns apart.
+
 ### Everything else
 
 `navigator.storage.persist()` is requested at startup, asking the browser
