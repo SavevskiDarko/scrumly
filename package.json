@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "build:single": "tsc --noEmit && vite build --mode single",
     "preview": "vite preview",
-    "test": "tsx test/smoke.ts"
+    "test": "tsx test/smoke.ts",
+    "save": "node scripts/save-data.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
