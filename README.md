@@ -1,13 +1,16 @@
 # Scrumly — the MVP, slices 1 to 5, plus multi-team
 
 A Scrum Master's working surface. Single user, local-first, no server.
-Everything lives in IndexedDB in your browser on your machine.
+Runs as a desktop app with its data in a file you own, or in a browser
+tab out of IndexedDB.
 
 ## Running it
 
     npm install
-    npm run dev          # http://localhost:5173
+    npm run app          # the desktop app, with hot reload
+    npm run dev          # the browser version, http://localhost:5173
 
+    npm run app:build    # a Windows installer and portable exe -> dist-app/
     npm run build        # normal production bundle -> dist/
     npm run build:single # one self-contained HTML file -> dist-single/index.html
     npm test             # smoke tests for the repository layer
@@ -149,6 +152,34 @@ Columns and whiteboards stay shared across teams on purpose: the
 workflow and the diagrams are usually yours rather than any one team's.
 Say the word if a team should own its own columns.
 
+## Dates
+
+Every date Scrumly writes to the screen is `dd/mm/yyyy`, through the one
+formatter in `src/lib/dates.ts`. Screens used to format their own and
+each picked something different — `5 Mar` in the task drawer, `5 March`
+at setup, the browser's locale default in Settings, and a raw
+`2026-03-05` wherever an ISO string reached the page unformatted.
+
+Storage did not change: sprint dates and due dates are still ISO
+`YYYY-MM-DD` in the database, because that sorts and compares correctly
+as a plain string and the repo layer relies on it throughout.
+
+Two deliberate exceptions:
+
+- **`<input type="date">` is drawn by the browser,** in its own UI
+  locale, and a page cannot set that. On a US-locale machine the pickers
+  came out `09/28/2026` next to text reading `28/09/2026`. The desktop
+  app fixes it at the source — `electron/main.cjs` starts Chromium with
+  `--lang=en-GB`, whose short date is `dd/mm/yyyy`. In a browser tab the
+  pickers still follow whatever locale that browser is set to.
+- **Recent activity stays relative.** "today", "yesterday" and "3 days
+  ago" on the boards library and the blockers screen answer "is this
+  current" faster than a date does. Past a week it is a date again.
+
+Filenames are not dates in this sense and keep `YYYY-MM-DD`
+(`scrumly-2026-09-21.json`): they are sorted lexicographically by the
+pruning code, which only works biggest-unit-first.
+
 ## Column names carry meaning
 
 `ownerOf` in `src/repo/insights.ts` decides who is answerable for a task
@@ -167,7 +198,76 @@ product — days in a column, stuck lists, carry-over, burndown, cycle
 time — is read back out of `statusEvents`. If a write skips that path,
 the history is silently wrong and no error tells you.
 
-## Storage
+## The desktop app
+
+`npm run app` opens Scrumly in its own window — no address bar, no tab to
+lose, no dev server to remember to start. `npm run app:build` turns it
+into an installer and a portable `.exe` under `dist-app/`.
+
+`electron-builder` is pinned to 25.x on purpose. 26.x `require()`s
+`@noble/hashes` v2, which is ESM-only, and `require()` of an ES module
+needs Node 22.12 or newer — on Node 20 packaging dies with
+`ERR_REQUIRE_ESM` after a clean bundle build, which reads like a Scrumly
+problem and is not one. Move to 26.x when this repo moves to Node 22.
+
+It is Electron, and the renderer is the same bundle the browser gets.
+Three things are different, and the second is the reason it exists:
+
+- **A fixed origin.** In a browser, IndexedDB is keyed to the origin —
+  scheme, host *and port*. `localhost:5173` and `localhost:5183` are two
+  different databases, `file://` is a third, and clearing site data
+  empties all of them. That is why a tab that worked yesterday can open
+  showing first-run setup. The packaged app serves itself from
+  `app://scrumly`, which never changes between versions or launches.
+- **A data file it owns.** See below.
+- **Links open outside.** Anything `http(s)` goes to the real browser
+  rather than navigating the Scrumly window somewhere it cannot come
+  back from.
+
+The main process is three small files. `electron/main.cjs` is the window,
+the menu and the `app://` handler; `electron/storage.cjs` is the file on
+disk; `electron/preload.cjs` is the whole of what the renderer can reach
+— five functions, no filesystem. Node stays off in the renderer and
+`contextIsolation` stays on, so nothing the app depends on, now or later,
+can touch the disk on its own.
+
+### The data file
+
+The live store is still Dexie and IndexedDB, and nothing in `src/repo`
+changed. What the desktop app adds is a plain JSON file that is the copy
+that actually matters:
+
+    %APPDATA%\Scrumly\data\
+      scrumly.json                     everything, rewritten on change
+      history/scrumly-2026-09-21.json  one per day, thirty kept
+
+Two rules, and together they are the whole of "it remembers everything":
+
+- **Starting with an empty database loads the file.** After a reinstall,
+  a profile reset, or a first run on a new machine, the data comes back
+  by itself. Nobody has to know a restore exists.
+- **Starting with work already in the database keeps it,** and brings the
+  file up to date behind it. `Load from file` in Settings is how you go
+  the other way on purpose.
+
+Writes are debounced a couple of seconds off Dexie's `storagemutated`
+event — the same signal `liveQuery` uses — and go through a temp file and
+a rename, so a crash mid-write cannot leave a half-written `scrumly.json`
+where the data used to be. Quitting flushes first, so the last few
+seconds of a stand-up are never the part that goes missing.
+
+The case that needed the most care is a data file that exists but cannot
+be parsed. Starting fresh and then autosaving would turn a one-line
+syntax error into an empty file. Instead the app holds every write,
+says so in Settings and in a toast, and leaves the file on disk exactly
+as it found it.
+
+**Change folder…** in Settings moves it anywhere — inside OneDrive,
+Dropbox or a git repository — and unlike the browser's folder mirror
+there is no permission to re-grant, ever. The layout written is identical
+to the one below, so the two can share a folder.
+
+## Storage in the browser
 
 The live database is IndexedDB, in one browser profile on one machine.
 That has not changed, and nothing about how the app reads or writes goes
@@ -175,6 +275,9 @@ through anything else. What has changed is that it no longer has to be
 the only copy.
 
 ### The local folder
+
+Only in the browser: the desktop app shows its **Data file** panel here
+instead, because two writers for one set of data is how they diverge.
 
 Settings has a **Local folder** panel. Point it at a directory once and
 Scrumly keeps a plain JSON copy of everything there, rewritten a couple

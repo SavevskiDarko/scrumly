@@ -4,16 +4,13 @@ import { db } from '../db/schema'
 import type { ID, Priority } from '../db/types'
 import { go, setParam } from '../hooks/useRoute'
 import { usePickablePeople } from '../hooks/useTeamPeople'
+import { formatDate } from '../lib/dates'
 import { boards as boardRepo, daysInStatus, sprints as sprintRepo, tasks as taskRepo } from '../repo'
 import { Avatar } from './Avatar'
 import { BlockedPanel } from './BlockedPanel'
 import { useToast } from './Toast'
 
 const PRIORITIES: Priority[] = ['low', 'normal', 'high', 'urgent']
-
-function when(ts: number) {
-  return new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-}
 
 export function TaskDrawer({ taskId }: { taskId: ID }) {
   const toast = useToast()
@@ -212,7 +209,9 @@ export function TaskDrawer({ taskId }: { taskId: ID }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {history.map((h) => (
                 <div key={h.id} className="small muted" style={{ display: 'flex', gap: 8 }}>
-                  <span className="faint" style={{ width: 54, flex: 'none' }}>{when(h.at)}</span>
+                  {/* Wide enough for a full dd/mm/yyyy, so the event text beside
+                      it starts in the same place on every row. */}
+                  <span className="faint" style={{ width: 72, flex: 'none' }}>{formatDate(h.at)}</span>
                   <span>
                     {h.fromStatusId
                       ? `${statusById.get(h.fromStatusId)?.name ?? '?'} → ${statusById.get(h.toStatusId)?.name ?? '?'}`

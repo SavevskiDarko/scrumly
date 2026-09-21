@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
 import type { Sprint } from '../db/types'
 import { setParam } from '../hooks/useRoute'
+import { formatDate } from '../lib/dates'
 import {
   blockers as blockerRepo, buildIndex, daysInStatus, flowStats, isStuckTask,
   settings as settingsRepo, sprints as repo, sprintStats, todayISO, velocity, workingDays,
@@ -87,7 +88,7 @@ export function Sprints({ teamId }: { teamId: string }) {
       lengthDays: cfg?.sprintLengthDays ?? 14,
       startWeekday: cfg?.sprintStartWeekday ?? 1,
     })
-    toast(`${s.name} planned for ${s.startDate}`)
+    toast(`${s.name} planned for ${formatDate(s.startDate)}`)
   }
 
   return (
