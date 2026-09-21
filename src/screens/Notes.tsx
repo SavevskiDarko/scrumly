@@ -6,11 +6,9 @@ import { db } from '../db/schema'
 import type { Conversion, NoteType } from '../db/types'
 import { setParam } from '../hooks/useRoute'
 import { useTeamPeople } from '../hooks/useTeamPeople'
+import { formatDate } from '../lib/dates'
 import { NOTE_TYPES, notes as repo } from '../repo'
 
-function when(ts: number) {
-  return new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-}
 const labelOf = (t: NoteType) => NOTE_TYPES.find((x) => x.value === t)?.label ?? t
 
 export function Notes({ teamId }: { teamId: string }) {
@@ -103,7 +101,7 @@ export function Notes({ teamId }: { teamId: string }) {
             <button key={n.id} className={`note-row${n.id === selected ? ' on' : ''}`} onClick={() => setSelected(n.id)}>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <span className="chip">{labelOf(n.type)}</span>
-                <span className="small faint">{when(n.updatedAt)}</span>
+                <span className="small faint">{formatDate(n.updatedAt)}</span>
                 {n.isPrivate && <span className="chip solid">private</span>}
               </div>
               <b style={{ fontSize: 12.5, marginTop: 4, display: 'block' }}>{n.title}</b>

@@ -5,6 +5,7 @@ import { db } from '../db/schema'
 import { useAutoSaveApi } from '../components/AutoSaveProvider'
 import { useDesktop } from '../desktop/DesktopProvider'
 import { fileSize, isDesktop } from '../desktop/bridge'
+import { formatDate } from '../lib/dates'
 import { LIVE_FILE, fileStore } from '../repo/fileStore'
 import { backup, people as peopleRepo, saveTextFile, settings as settingsRepo, statuses as statusRepo, teams as teamRepo } from '../repo'
 
@@ -389,7 +390,7 @@ export function Settings() {
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void doImport(f); e.target.value = '' }} />
             <span className="small faint">
               {counts.tasks} tasks · {counts.people} people · {counts.events} recorded moves
-              {cfg?.lastBackupAt ? ` · last backup ${new Date(cfg.lastBackupAt).toLocaleDateString()}` : ' · never backed up'}
+              {cfg?.lastBackupAt ? ` · last backup ${formatDate(cfg.lastBackupAt)}` : ' · never backed up'}
             </span>
           </div>
           {dump && (

@@ -1,14 +1,17 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/schema'
 import { go } from '../hooks/useRoute'
+import { formatDate } from '../lib/dates'
 import { boards as boardRepo } from '../repo'
 
+// The first week stays relative, because "yesterday" answers "is this current"
+// faster than a date does. Past that it is a date, and dates are dd/mm/yyyy.
 function when(ts: number) {
   const d = Math.floor((Date.now() - ts) / 86_400_000)
   if (d === 0) return 'today'
   if (d === 1) return 'yesterday'
   if (d < 7) return `${d} days ago`
-  return new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  return formatDate(ts)
 }
 
 export function Boards() {

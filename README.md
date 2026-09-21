@@ -152,6 +152,34 @@ Columns and whiteboards stay shared across teams on purpose: the
 workflow and the diagrams are usually yours rather than any one team's.
 Say the word if a team should own its own columns.
 
+## Dates
+
+Every date Scrumly writes to the screen is `dd/mm/yyyy`, through the one
+formatter in `src/lib/dates.ts`. Screens used to format their own and
+each picked something different — `5 Mar` in the task drawer, `5 March`
+at setup, the browser's locale default in Settings, and a raw
+`2026-03-05` wherever an ISO string reached the page unformatted.
+
+Storage did not change: sprint dates and due dates are still ISO
+`YYYY-MM-DD` in the database, because that sorts and compares correctly
+as a plain string and the repo layer relies on it throughout.
+
+Two deliberate exceptions:
+
+- **`<input type="date">` is drawn by the browser,** in its own UI
+  locale, and a page cannot set that. On a US-locale machine the pickers
+  came out `09/28/2026` next to text reading `28/09/2026`. The desktop
+  app fixes it at the source — `electron/main.cjs` starts Chromium with
+  `--lang=en-GB`, whose short date is `dd/mm/yyyy`. In a browser tab the
+  pickers still follow whatever locale that browser is set to.
+- **Recent activity stays relative.** "today", "yesterday" and "3 days
+  ago" on the boards library and the blockers screen answer "is this
+  current" faster than a date does. Past a week it is a date again.
+
+Filenames are not dates in this sense and keep `YYYY-MM-DD`
+(`scrumly-2026-09-21.json`): they are sorted lexicographically by the
+pruning code, which only works biggest-unit-first.
+
 ## Column names carry meaning
 
 `ownerOf` in `src/repo/insights.ts` decides who is answerable for a task
