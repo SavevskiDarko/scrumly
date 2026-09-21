@@ -352,7 +352,12 @@ button,input,select,textarea{font:inherit;color:inherit}
 
 .seg.sm button{padding:2px 8px;font-size:11px}
 
-@media (max-width:760px){.menu-toggle{display:inline-flex}}
+/* The menu button is fixed, so it is out of flow — the screen's top bar has to
+   leave a lane for it or the title renders underneath. */
+@media (max-width:760px){
+  .menu-toggle{display:inline-flex}
+  .main > .topbar{padding-left:72px}
+}
 
 /* ---------- slice 4: canvas ---------- */
 .canvas-stage{flex:1;min-height:0;position:relative}
