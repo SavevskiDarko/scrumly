@@ -1,9 +1,11 @@
 # Dependencies — restored with `npm install`
 node_modules/
 
-# Build output — produced by `npm run build` and `npm run build:single`
+# Build output — produced by `npm run build`, `npm run build:single`
+# and `npm run app:build`
 dist/
 dist-single/
+dist-app/
 
 # Scrumly's own data is deliberately NOT ignored.
 #
