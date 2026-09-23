@@ -328,12 +328,15 @@ async function run() {
 
   // A backup written before any migration must still restore. This is the one
   // way the design can lose data, so each added version gets a case here.
+  const PI_TABLES = ['programIncrements', 'piObjectives', 'piRisks', 'piVotes']
   const modern = await backup.snapshot()
+
   const legacy = JSON.parse(JSON.stringify(modern))
   legacy.schemaVersion = 1
   delete legacy.tables.sprintEvents
   delete legacy.tables.conversions
   delete legacy.tables.standupNotes
+  for (const t of PI_TABLES) delete legacy.tables[t]
   const legacyRestore = await backup.restore(legacy)
   check('a backup from before the migration still restores', legacyRestore.ok, legacyRestore.error ?? '')
   check('and the new tables come back empty rather than broken', (await db.sprintEvents.count()) === 0)
@@ -341,9 +344,17 @@ async function run() {
   const v2 = JSON.parse(JSON.stringify(modern))
   v2.schemaVersion = 2
   delete v2.tables.standupNotes
+  for (const t of PI_TABLES) delete v2.tables[t]
   const v2Restore = await backup.restore(v2)
   check('a v2 backup, written before stand-up notes existed, restores', v2Restore.ok, v2Restore.error ?? '')
   check('and stand-up notes come back empty rather than broken', (await db.standupNotes.count()) === 0)
+
+  const v3 = JSON.parse(JSON.stringify(modern))
+  v3.schemaVersion = 3
+  for (const t of PI_TABLES) delete v3.tables[t]
+  const v3Restore = await backup.restore(v3)
+  check('a v3 backup, written before PI planning existed, restores', v3Restore.ok, v3Restore.error ?? '')
+  check('and the PI tables come back empty rather than broken', (await db.programIncrements.count()) === 0)
   const future = await backup.restore({ app: 'scrumly', schemaVersion: 99, tables: {} })
   check('a backup from a newer version is refused', !future.ok)
   const foreign = await backup.restore({ app: 'some-other-tool', schemaVersion: 1, tables: {} })
