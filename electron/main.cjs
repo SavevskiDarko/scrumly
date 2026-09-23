@@ -21,14 +21,11 @@ const { pathToFileURL } = require('node:url')
 // %APPDATA%, and renaming it later would orphan the config written into it.
 app.setName('Scrumly')
 
-// Every date Scrumly renders itself is dd/mm/yyyy (src/lib/dates.ts), but
-// <input type="date"> is drawn by Chromium in its own UI locale, and there is
-// no way to set that from the page. On a US-locale machine the sprint and due
-// date pickers came out mm/dd/yyyy while the text beside them read dd/mm/yyyy,
-// which is the one combination guaranteed to be misread. en-GB is the nearest
-// locale whose short date is dd/mm/yyyy; the app's own strings are English
-// already, so nothing else about it changes.
-app.commandLine.appendSwitch('lang', 'en-GB')
+// No --lang switch here on purpose. It looks like the fix for date fields
+// rendering mm/dd/yyyy and is not: it moves navigator.language and Intl, and
+// leaves <input type="date"> exactly where it was, because Chromium draws that
+// control from the machine's regional format. Captured both ways to be sure.
+// src/components/DateField.tsx is the actual fix.
 
 const storage = require('./storage.cjs')
 

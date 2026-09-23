@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
 import type { Sprint } from '../db/types'
 import { setParam } from '../hooks/useRoute'
+import { DateField } from '../components/DateField'
 import { formatDate } from '../lib/dates'
 import {
   blockers as blockerRepo, buildIndex, daysInStatus, flowStats, isStuckTask,
@@ -127,11 +128,11 @@ export function Sprints({ teamId }: { teamId: string }) {
                     onBlur={(e) => void save(active.id, { goal: e.target.value })} />
 
                   <div style={{ display: 'flex', gap: 7, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-                    <input className="input" type="date" style={{ width: 142 }} value={active.startDate}
-                      onChange={(e) => void save(active.id, { startDate: e.target.value })} />
+                    <DateField label="Sprint start" style={{ width: 166 }} value={active.startDate}
+                      onCommit={(iso) => { if (iso) void save(active.id, { startDate: iso }) }} />
                     <span className="small faint">to</span>
-                    <input className="input" type="date" style={{ width: 142 }} value={active.endDate}
-                      onChange={(e) => void save(active.id, { endDate: e.target.value })} />
+                    <DateField label="Sprint end" style={{ width: 166 }} value={active.endDate}
+                      onCommit={(iso) => { if (iso) void save(active.id, { endDate: iso }) }} />
                     <span className="small faint">
                       day {stats!.dayIndex} of {stats!.dayCount} working day{stats!.dayCount === 1 ? '' : 's'}
                     </span>
@@ -290,11 +291,11 @@ export function Sprints({ teamId }: { teamId: string }) {
                   key={`${s.id}-${s.name}`} defaultValue={s.name}
                   onBlur={(e) => void save(s.id, { name: e.target.value }, e.target, s.name)} />
                 <span className={`chip${s.state === 'active' ? ' on' : s.state === 'closed' ? ' solid' : ''}`}>{s.state}</span>
-                <input className="input" type="date" style={{ width: 138 }} value={s.startDate}
-                  onChange={(e) => void save(s.id, { startDate: e.target.value })} />
+                <DateField label={`${s.name} start`} style={{ width: 162 }} value={s.startDate}
+                  onCommit={(iso) => { if (iso) void save(s.id, { startDate: iso }) }} />
                 <span className="small faint">to</span>
-                <input className="input" type="date" style={{ width: 138 }} value={s.endDate}
-                  onChange={(e) => void save(s.id, { endDate: e.target.value })} />
+                <DateField label={`${s.name} end`} style={{ width: 162 }} value={s.endDate}
+                  onCommit={(iso) => { if (iso) void save(s.id, { endDate: iso }) }} />
                 <span className="small faint" style={{ flex: 1 }}>
                   {workingDays(s.startDate, s.endDate).length}d · {done} of {count} done
                 </span>

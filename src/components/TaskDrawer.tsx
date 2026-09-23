@@ -8,6 +8,7 @@ import { formatDate } from '../lib/dates'
 import { boards as boardRepo, daysInStatus, sprints as sprintRepo, tasks as taskRepo } from '../repo'
 import { Avatar } from './Avatar'
 import { BlockedPanel } from './BlockedPanel'
+import { DateField } from './DateField'
 import { useToast } from './Toast'
 
 const PRIORITIES: Priority[] = ['low', 'normal', 'high', 'urgent']
@@ -188,7 +189,10 @@ export function TaskDrawer({ taskId }: { taskId: ID }) {
             />
 
             <span className="label">Due</span>
-            <input className="input" type="date" value={task.dueDate ?? ''} onChange={(e) => taskRepo.update(task.id, { dueDate: e.target.value || null })} />
+            {/* Clearable: a task losing its due date is a normal edit, unlike a
+                sprint, which always has one. */}
+            <DateField label="Due date" clearable value={task.dueDate ?? null}
+              onCommit={(iso) => void taskRepo.update(task.id, { dueDate: iso })} />
 
             <span className="label">Project</span>
             <input className="input" placeholder="Optional label" key={`project-${task.id}`} defaultValue={task.project ?? ''}

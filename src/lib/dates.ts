@@ -44,3 +44,35 @@ export function formatDateWithWeekday(value: string | number | Date, fallback = 
   if (!d) return fallback
   return `${d.toLocaleDateString(undefined, { weekday: 'long' })}, ${formatDate(d)}`
 }
+
+/** What the database stores and compares: 'YYYY-MM-DD', local, never UTC. */
+export function toISODate(d: Date): string {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/**
+ * Reads what somebody typed into a date field, day first. Returns ISO, or null
+ * if it is not a real date.
+ *
+ * Deliberately forgiving about separators and padding — `1/9/26`, `01-09-2026`
+ * and `1.9.2026` all mean the same thing to the person typing them — and
+ * deliberately strict about the result. 31/02/2026 is rejected rather than
+ * rolled forward into March, because a silently moved date is worse than a
+ * rejected one.
+ */
+export function parseDateInput(text: string): string | null {
+  const m = text.trim().match(/^(\d{1,2})\s*[/.\-\s]\s*(\d{1,2})\s*[/.\-\s]\s*(\d{2}|\d{4})$/)
+  if (!m) return null
+
+  const day = Number(m[1])
+  const month = Number(m[2])
+  // A two-digit year is this century. Scrumly plans sprints, not history.
+  const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3])
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+
+  const d = new Date(year, month - 1, day, 12)
+  // Date rolls 31 February over into March instead of refusing. Reading the
+  // parts back is the only way to know the date survived intact.
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null
+  return toISODate(d)
+}
