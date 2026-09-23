@@ -382,8 +382,10 @@ Export and restore by hand still work and still produce the same JSON.
 
 ## On a tablet or phone
 
-The hosted build installs as an app. Deploy `dist/` to any HTTPS host, open
-it in Chrome on Android, and use **⋮ → Install app** (or Add to Home
+The hosted build installs as an app. Every push to `main` is built and
+published to GitHub Pages by `.github/workflows/pages.yml`, at
+https://savevskidarko.github.io/scrumly/ (any other HTTPS host serving
+`dist/` works the same). Open it in Chrome on Android, and use **⋮ → Install app** (or Add to Home
 screen). It opens full-screen from its own icon and works with no
 connection: every file in the build is cached the first time it loads.
 
