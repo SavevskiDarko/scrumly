@@ -55,6 +55,23 @@ Added no tables and required no migration: every table went in at v1.
   arrow keys between people, a timer, and capture that lands on the
   right task while someone is still talking. Ending it shows what
   changed — nothing to write up afterwards
+- What each person said, in their own words, typed while they are still
+  talking and on screen again at the next stand-up. One box per person
+  per stand-up, saved as you type and flushed when you move on, finish,
+  or leave the screen — losing a line because somebody pressed the arrow
+  key would be the whole thing failing at the only moment it matters.
+  Yesterday's words sit directly above today's box, so reading one and
+  writing the other is a glance rather than a scroll. Somebody away on
+  Tuesday still gets Monday's read back on Wednesday: it is the last
+  thing they said, not the last stand-up that happened
+- The running order is arrangeable. Drag it, or use the arrows, on the
+  card before you start. A team with no arrangement rotates
+  alphabetically so the same person is not always last, which is what
+  every stand-up did before this existed; arrange one and it is used
+  exactly as arranged and never rotated, because rotating an order
+  somebody chose would look like the app losing it. The team keeps it
+  until it is changed. People who leave drop out, people who join go on
+  the end rather than being quietly left out of the meeting
 - Follow-ups, pulled forward from slice 5 because a stand-up you cannot
   capture into is pointless. Yours, not the team's; they wait on Today
 - Command palette on Cmd/Ctrl-K: tasks, people, and verbs. Written by
@@ -112,13 +129,15 @@ English. The diagrams are unaffected.
 - Burndown runs over working days, so a two-week sprint burns over ten
   points rather than fourteen
 
-### The first migration
+### The migrations
 
 Schema v2 adds two tables: `sprintEvents` (which task joined or left
 which sprint, and when) and `conversions` (what a note turned into).
-Adding stores only, so Dexie carries every existing row across
-untouched. A backup written under v1 still restores — there is a test
-for exactly that, because it is the one way this design can lose data. The sidebar lists
+v3 adds `standupNotes` — what each person said, one row per person per
+stand-up. Both add stores only, so Dexie carries every existing row
+across untouched. A backup written under v1 or v2 still restores, and
+each version has its own test for exactly that, because it is the one
+way this design can lose data. The sidebar lists
 them with the slice that brings each one, and the Today screen says
 plainly which of its panels are still missing rather than showing
 placeholder numbers.
@@ -164,17 +183,35 @@ Storage did not change: sprint dates and due dates are still ISO
 `YYYY-MM-DD` in the database, because that sorts and compares correctly
 as a plain string and the repo layer relies on it throughout.
 
-Two deliberate exceptions:
+### Why the date fields are hand-rolled
 
-- **`<input type="date">` is drawn by the browser,** in its own UI
-  locale, and a page cannot set that. On a US-locale machine the pickers
-  came out `09/28/2026` next to text reading `28/09/2026`. The desktop
-  app fixes it at the source — `electron/main.cjs` starts Chromium with
-  `--lang=en-GB`, whose short date is `dd/mm/yyyy`. In a browser tab the
-  pickers still follow whatever locale that browser is set to.
-- **Recent activity stays relative.** "today", "yesterday" and "3 days
-  ago" on the boards library and the blockers screen answer "is this
-  current" faster than a date does. Past a week it is a date again.
+`<input type="date">` cannot be made to show `dd/mm/yyyy`. Chromium
+draws that control from the machine's regional format — not from the
+page, and not from the application. On a US-locale machine the sprint
+and due date fields rendered `09/28/2026` directly beside Scrumly's own
+text reading `28/09/2026`: the same two numbers meaning opposite things,
+which is worse than either format alone.
+
+Electron's `--lang` switch looks like the fix and is not. It moves
+`navigator.language` and `Intl`, and leaves the control exactly where it
+was. That was checked by screenshotting a real date input inside
+Electron with the switch on and off — identical, `09/28/2026` both
+times. `electron/main.cjs` carries a note so nobody re-adds it.
+
+So `src/components/DateField.tsx` owns the text. It reads and writes
+`dd/mm/yyyy`, is forgiving about what is typed into it (`1/9/26`,
+`01-09-2026` and `1.9.2026` all land on the same day) and strict about
+what it accepts — `31/02/2026` is refused and marked rather than rolled
+forward into March. The value in and out is always ISO; nothing below
+the UI sees `dd/mm/yyyy`. The native control is still there, hidden, for
+the one thing it is better at: the calendar popup behind the ▾ button,
+which draws a grid that reads the same in any locale.
+
+### Relative dates
+
+"today", "yesterday" and "3 days ago" on the boards library and the
+blockers screen stay relative. They answer "is this current" faster than
+a date does. Past a week it is a date again.
 
 Filenames are not dates in this sense and keep `YYYY-MM-DD`
 (`scrumly-2026-09-21.json`): they are sorted lexicographically by the

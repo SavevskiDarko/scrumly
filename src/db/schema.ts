@@ -1,11 +1,11 @@
 import Dexie, { type Table } from 'dexie'
 import type {
   Availability, Blocker, Board, BoardLink, Chase, Conversion, ExternalLink, FollowUp,
-  Note, Person, Process, ProcessRun, Settings, Sprint, SprintEvent, Standup, Status,
-  StatusEvent, Task, TaskLink, Team,
+  Note, Person, Process, ProcessRun, Settings, Sprint, SprintEvent, Standup, StandupNote,
+  Status, StatusEvent, Task, TaskLink, Team,
 } from './types'
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 export class ScrumlyDB extends Dexie {
   settings!: Table<Settings, number>
@@ -29,6 +29,7 @@ export class ScrumlyDB extends Dexie {
   standups!: Table<Standup, string>
   sprintEvents!: Table<SprintEvent, string>
   conversions!: Table<Conversion, string>
+  standupNotes!: Table<StandupNote, string>
 
   constructor() {
     // The IndexedDB database is still called 'cadence' — the app's first name.
@@ -66,6 +67,13 @@ export class ScrumlyDB extends Dexie {
       sprintEvents: 'id, taskId, at, toSprintId',
       conversions: 'id, noteId, createdId',
     })
+
+    // v3 — what each person said at each stand-up. Adding a store only, same
+    // as v2, so every existing row comes across untouched and a backup written
+    // under v1 or v2 still restores.
+    this.version(3).stores({
+      standupNotes: 'id, standupId, personId, teamId, at, [standupId+personId]',
+    })
   }
 }
 
@@ -75,5 +83,5 @@ export const ALL_TABLE_NAMES = [
   'settings', 'teams', 'people', 'statuses', 'sprints', 'tasks', 'statusEvents',
   'taskLinks', 'externalLinks', 'blockers', 'chases', 'availability', 'boards',
   'boardLinks', 'notes', 'followUps', 'processes', 'processRuns', 'standups',
-  'sprintEvents', 'conversions',
+  'sprintEvents', 'conversions', 'standupNotes',
 ] as const

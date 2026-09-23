@@ -4,10 +4,11 @@ import {
   backup, blockedDays, blockers, boards, buildIndex, cycleTimeOf, filterByBucket,
   flowStats, followUps, groupWaitingOn, loadByPerson, ownerFieldFor, ownerOf,
   parseQuickAdd, people, queues, rotate, notes, settings, sprints, sprintStats,
-  standups, statuses, tasks, teams, velocity, workingDays, addDays, nextWeekday,
+  standups, statuses, tasks, teams, velocity, workingDays, addDays, nextWeekday, runningOrder,
 } from '../src/repo'
 import { flowSkeleton, looksLikeFlow, parseFlow } from '../src/canvas/quickFlow'
 import { fileStore, historyName, prunable } from '../src/repo/fileStore'
+import { formatDate, parseDateInput } from '../src/lib/dates'
 
 let failures = 0
 function check(label: string, cond: boolean, extra = '') {
@@ -325,15 +326,24 @@ async function run() {
   const emptyConvert = await notes.convert(note.id, '   ', 'followUp', {})
   check('converting nothing is refused', !emptyConvert.ok)
 
-  // A backup written before the v2 migration must still restore.
+  // A backup written before any migration must still restore. This is the one
+  // way the design can lose data, so each added version gets a case here.
   const modern = await backup.snapshot()
   const legacy = JSON.parse(JSON.stringify(modern))
   legacy.schemaVersion = 1
   delete legacy.tables.sprintEvents
   delete legacy.tables.conversions
+  delete legacy.tables.standupNotes
   const legacyRestore = await backup.restore(legacy)
   check('a backup from before the migration still restores', legacyRestore.ok, legacyRestore.error ?? '')
   check('and the new tables come back empty rather than broken', (await db.sprintEvents.count()) === 0)
+
+  const v2 = JSON.parse(JSON.stringify(modern))
+  v2.schemaVersion = 2
+  delete v2.tables.standupNotes
+  const v2Restore = await backup.restore(v2)
+  check('a v2 backup, written before stand-up notes existed, restores', v2Restore.ok, v2Restore.error ?? '')
+  check('and stand-up notes come back empty rather than broken', (await db.standupNotes.count()) === 0)
   const future = await backup.restore({ app: 'scrumly', schemaVersion: 99, tables: {} })
   check('a backup from a newer version is refused', !future.ok)
   const foreign = await backup.restore({ app: 'some-other-tool', schemaVersion: 1, tables: {} })
@@ -650,6 +660,102 @@ async function run() {
     new Date(`${wed.startDate}T12:00:00`).getDay() === 3, wed.startDate)
 
   // ---------- the folder copy ----------
+  console.log('\n  -- what they said --')
+
+  const noteTeam = await teams.create({ name: 'Said Team' })
+  const speaker = await people.create({ name: 'Speaker One', role: 'Developer', teamIds: [noteTeam.id] })
+  const quiet = await people.create({ name: 'Quiet One', role: 'QA', teamIds: [noteTeam.id] })
+
+  const day1 = await standups.start(noteTeam.id)
+  await standups.saveNote({ standupId: day1.id, teamId: noteTeam.id, personId: speaker.id, text: '  Finishing the refund flow  ' })
+  const saved1 = await standups.note(day1.id, speaker.id)
+  check('a note is written against the person and the stand-up', saved1?.text === 'Finishing the refund flow', saved1?.text ?? '')
+  check('and is stamped with the stand-up, not the moment of typing', saved1?.at === day1.startedAt)
+
+  await standups.saveNote({ standupId: day1.id, teamId: noteTeam.id, personId: speaker.id, text: 'Actually, reviewing' })
+  check('saving again overwrites rather than piling up rows',
+    (await db.standupNotes.where('standupId').equals(day1.id).count()) === 1)
+  check('and keeps the newer words', (await standups.note(day1.id, speaker.id))?.text === 'Actually, reviewing')
+
+  check('nothing is remembered for somebody on their first stand-up',
+    (await standups.previousNote(speaker.id, day1.startedAt)) === null)
+  await standups.end(day1.id)
+
+  // The next day: what was said before has to be on screen again.
+  const day2 = await standups.start(noteTeam.id)
+  await db.standups.update(day2.id, { startedAt: day1.startedAt + 86_400_000, date: '2026-09-22' })
+  const day2Row = (await db.standups.get(day2.id))!
+  const recalled = await standups.previousNote(speaker.id, day2Row.startedAt)
+  check('the next stand-up reads back what they said last time', recalled?.text === 'Actually, reviewing', recalled?.text ?? '')
+  check('somebody who has never said anything reads back nothing',
+    (await standups.previousNote(quiet.id, day2Row.startedAt)) === null)
+  check('and the note does not leak into the day it belongs after',
+    (await standups.note(day2.id, speaker.id)) === undefined)
+
+  // Someone absent on day two should still hear day one's words on day three.
+  await standups.end(day2.id)
+  const day3 = await standups.start(noteTeam.id)
+  await db.standups.update(day3.id, { startedAt: day1.startedAt + 2 * 86_400_000 })
+  const day3Row = (await db.standups.get(day3.id))!
+  check('a gap does not lose the last thing they said',
+    (await standups.previousNote(speaker.id, day3Row.startedAt))?.text === 'Actually, reviewing')
+
+  await standups.saveNote({ standupId: day3.id, teamId: noteTeam.id, personId: speaker.id, text: '   ' })
+  check('clearing the box removes the note rather than remembering silence',
+    (await standups.note(day3.id, speaker.id)) === undefined)
+
+  await standups.cancel(day3.id)
+  check('abandoning a stand-up takes its notes with it',
+    (await db.standupNotes.where('standupId').equals(day3.id).count()) === 0)
+  check('and leaves the earlier ones alone',
+    (await db.standupNotes.where('standupId').equals(day1.id).count()) === 1)
+
+  console.log('\n  -- stand-up order --')
+
+  const members = ['a', 'b', 'c', 'd']
+  check('with nothing arranged it still rotates',
+    runningOrder(members, undefined, 1).join('') === 'bcda', runningOrder(members, undefined, 1).join(''))
+  check('an empty arrangement reads the same as none',
+    runningOrder(members, [], 1).join('') === 'bcda', runningOrder(members, [], 1).join(''))
+  // The point of arranging one: it is used as given, not rotated on top.
+  check('an arranged order is used exactly as arranged',
+    runningOrder(members, ['d', 'a', 'c', 'b'], 7).join('') === 'dacb', runningOrder(members, ['d', 'a', 'c', 'b'], 7).join(''))
+  check('and does not drift from one day to the next',
+    runningOrder(members, ['d', 'a', 'c', 'b'], 1).join('') === runningOrder(members, ['d', 'a', 'c', 'b'], 200).join(''))
+  check('somebody who left the team is dropped',
+    runningOrder(['a', 'b'], ['b', 'gone', 'a'], 0).join('') === 'ba', runningOrder(['a', 'b'], ['b', 'gone', 'a'], 0).join(''))
+  // A newcomer missing from the arrangement must not be missing from the
+  // meeting; the end is the only place they can go without guessing.
+  check('somebody who joined goes on the end rather than being skipped',
+    runningOrder(['a', 'b', 'c'], ['c', 'a'], 0).join('') === 'cab', runningOrder(['a', 'b', 'c'], ['c', 'a'], 0).join(''))
+  check('two newcomers keep the order they were given in',
+    runningOrder(['a', 'b', 'c', 'd'], ['c'], 0).join('') === 'cabd', runningOrder(['a', 'b', 'c', 'd'], ['c'], 0).join(''))
+  check('an arrangement nobody is left in falls back rather than emptying the meeting',
+    runningOrder(['a', 'b'], ['x', 'y'], 0).length === 2, String(runningOrder(['a', 'b'], ['x', 'y'], 0).length))
+  check('one person is left alone whatever is arranged',
+    runningOrder(['a'], ['a'], 5).join('') === 'a')
+
+  console.log('\n  -- dates --')
+
+  check('a timestamp reads dd/mm/yyyy', formatDate(new Date(2026, 8, 21, 9)) === '21/09/2026', formatDate(new Date(2026, 8, 21, 9)))
+  check('and the day and month are zero-padded', formatDate(new Date(2026, 0, 5, 9)) === '05/01/2026', formatDate(new Date(2026, 0, 5, 9)))
+  // The bug this guards: a bare YYYY-MM-DD parses as UTC midnight, which is
+  // the day before anywhere west of Greenwich. Due dates are stored that way.
+  check('a stored ISO day is not shifted by the timezone', formatDate('2026-09-21') === '21/09/2026', formatDate('2026-09-21'))
+  check('nothing shows an em dash rather than a wrong date', formatDate(null) === '—', formatDate(null))
+
+  check('a typed date is read day first', parseDateInput('21/09/2026') === '2026-09-21', String(parseDateInput('21/09/2026')))
+  check('unpadded is fine', parseDateInput('1/9/2026') === '2026-09-01', String(parseDateInput('1/9/2026')))
+  check('so are dots and dashes', parseDateInput('1.9.2026') === '2026-09-01' && parseDateInput('01-09-2026') === '2026-09-01')
+  check('a two-digit year is this century', parseDateInput('21/09/26') === '2026-09-21', String(parseDateInput('21/09/26')))
+  // Date() rolls 31 February forward into March rather than refusing, so a
+  // date that survives the round trip is the only proof it was real.
+  check('an impossible date is refused, not rolled forward', parseDateInput('31/02/2026') === null, String(parseDateInput('31/02/2026')))
+  check('a month past twelve is refused', parseDateInput('01/13/2026') === null, String(parseDateInput('01/13/2026')))
+  check('and so is anything that is not a date', parseDateInput('tomorrow') === null && parseDateInput('') === null)
+  check('what parses back out formats the same way in',
+    formatDate(parseDateInput('29/02/2028')!) === '29/02/2028', formatDate(parseDateInput('29/02/2028')!))
+
   console.log('\n  -- local folder --')
 
   check('a day gets one dated snapshot',

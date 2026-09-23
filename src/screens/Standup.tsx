@@ -1,14 +1,16 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Avatar } from '../components/Avatar'
+import { StandupOrder } from '../components/StandupOrder'
 import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
 import type { Person, StatusEvent, Task } from '../db/types'
 import { go } from '../hooks/useRoute'
 import { useTeamPeople } from '../hooks/useTeamPeople'
+import { formatDate } from '../lib/dates'
 import {
   blockedDays, blockers as blockerRepo, buildIndex, daysInStatus, followUps as fuRepo,
-  standups, tasks as taskRepo, type StandupSummary,
+  standups, tasks as taskRepo, teams as teamRepo, type StandupSummary,
 } from '../repo'
 
 type Capture = 'blocker' | 'followup' | 'task'
@@ -40,6 +42,10 @@ export function Standup({ teamId }: { teamId: string }) {
   )
   const allStandups = useLiveQuery(() => db.standups.where('teamId').equals(teamId).sortBy('startedAt'), [teamId], [])
   const people = useTeamPeople(teamId)
+  const team = useLiveQuery(() => db.teams.get(teamId), [teamId])
+  // Recomputed by liveQuery whenever the arrangement or the membership moves,
+  // so what the card shows is what start() will use.
+  const nextOrder = useLiveQuery(() => standups.nextOrder(teamId), [teamId], [])
   const statuses = useLiveQuery(() => db.statuses.orderBy('order').toArray(), [], [])
   const tasks = useLiveQuery(() => db.tasks.where('teamId').equals(teamId).toArray(), [teamId], [])
   const openBlockers = useLiveQuery(() => blockerRepo.listOpen(), [], [])
@@ -74,6 +80,53 @@ export function Standup({ teamId }: { teamId: string }) {
     : []
 
   useEffect(() => { setTargetTaskId(theirActive[0]?.id ?? theirs[0]?.id ?? '') }, [current?.id, theirs.length])
+
+  /**
+   * What this person said, typed while they are still talking.
+   *
+   * The draft is held in a ref as well as in state because it has to be
+   * written out from places that are not a render: moving to the next person,
+   * finishing the meeting, leaving the screen. A note lost because somebody
+   * pressed the arrow key rather than clicking away would be the whole feature
+   * failing at the only moment it matters.
+   */
+  const [saidDraft, setSaidDraft] = useState('')
+  const said = useRef({ personId: '', standupId: '', text: '', dirty: false })
+  const saidTimer = useRef<number | null>(null)
+
+  const flushSaid = useCallback(async () => {
+    const pending = said.current
+    if (saidTimer.current) { window.clearTimeout(saidTimer.current); saidTimer.current = null }
+    if (!pending.dirty || !pending.personId || !pending.standupId) return
+    said.current = { ...pending, dirty: false }
+    await standups.saveNote({
+      standupId: pending.standupId, teamId, personId: pending.personId, text: pending.text,
+    })
+  }, [teamId])
+
+  // Swap the draft when the person changes, writing the outgoing one out first.
+  useEffect(() => {
+    let cancelled = false
+    void flushSaid()
+    said.current = { personId: current?.id ?? '', standupId: session?.id ?? '', text: '', dirty: false }
+    setSaidDraft('')
+    if (!current || !session) return
+    void standups.note(session.id, current.id).then((n) => {
+      // Ignore a slow read that lands after they have started typing.
+      if (cancelled || said.current.dirty || said.current.personId !== current.id) return
+      setSaidDraft(n?.text ?? '')
+      said.current = { ...said.current, text: n?.text ?? '' }
+    })
+    return () => { cancelled = true }
+  }, [current?.id, session?.id, flushSaid])
+
+  // Leaving the screen entirely, by any route.
+  useEffect(() => () => { void flushSaid() }, [flushSaid])
+
+  const previousSaid = useLiveQuery(
+    () => (current && session ? standups.previousNote(current.id, session.startedAt) : Promise.resolve(null)),
+    [current?.id, session?.startedAt], null,
+  )
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -132,7 +185,41 @@ export function Standup({ teamId }: { teamId: string }) {
             One person at a time, their work already on screen, and anything you capture lands on the right task straight away.
             Arrow keys move between people.
           </p>
-          <button className="btn primary" disabled={people.length === 0} onClick={async () => {
+
+          {people.length > 0 && (
+            <>
+              <p className="panel-title" style={{ marginBottom: 6 }}>
+                Running order
+                <span className="spacer" />
+                {team?.standupOrder?.length
+                  ? <span className="chip on">arranged</span>
+                  : <span className="chip">rotating</span>}
+              </p>
+              <StandupOrder
+                order={nextOrder}
+                people={people}
+                // Saved as it is dragged. Arranging the order and then losing it
+                // to a misclick on Start is not a trade worth making.
+                onReorder={(next) => void teamRepo.setStandupOrder(teamId, next)}
+              />
+              <p className="small faint" style={{ marginTop: 8 }}>
+                {team?.standupOrder?.length
+                  ? 'This team keeps this order until you change it. Anyone who joins goes on the end.'
+                  : 'Rotating alphabetically, so the same person is not always last. Rearrange it and the team keeps what you set.'}
+                {!!team?.standupOrder?.length && (
+                  <>
+                    {' '}
+                    <button className="btn ghost sm" style={{ padding: '0 6px' }}
+                      onClick={() => void teamRepo.setStandupOrder(teamId, null)}>
+                      Back to rotating
+                    </button>
+                  </>
+                )}
+              </p>
+            </>
+          )}
+
+          <button className="btn primary" style={{ marginTop: 14 }} disabled={people.length === 0} onClick={async () => {
             await standups.start(teamId); setIndex(0); setFinished(null)
           }}>
             {people.length === 0 ? 'Nobody is in this team yet' : `Start with ${people.length} people`}
@@ -184,6 +271,8 @@ export function Standup({ teamId }: { teamId: string }) {
           await standups.cancel(session.id); go('today')
         }}>Abandon</button>
         <button className="btn" onClick={async () => {
+          // Whatever is still in the box belongs to the meeting that is ending.
+          await flushSaid()
           const s = await standups.summary(session)
           await standups.end(session.id)
           setFinished(s)
@@ -239,6 +328,41 @@ export function Standup({ teamId }: { teamId: string }) {
               </div>
             </div>
 
+            <div className="panel" style={{ marginBottom: 12 }}>
+              <p className="panel-title">
+                What they said
+                <span className="spacer" />
+                <span className="small faint" style={{ fontWeight: 400 }}>saves as you type</span>
+              </p>
+
+              {previousSaid && (
+                <div className="said-last">
+                  <span className="said-last-when">Last time · {formatDate(previousSaid.date)}</span>
+                  {previousSaid.text}
+                </div>
+              )}
+
+              <textarea
+                className="input said-box"
+                rows={3}
+                placeholder={`What is ${current.name.split(' ')[0]} working on today?`}
+                value={saidDraft}
+                onChange={(e) => {
+                  const text = e.target.value
+                  setSaidDraft(text)
+                  said.current = { ...said.current, text, dirty: true }
+                  if (saidTimer.current) window.clearTimeout(saidTimer.current)
+                  saidTimer.current = window.setTimeout(() => { void flushSaid() }, 700)
+                }}
+                onBlur={() => { void flushSaid() }}
+              />
+              {!previousSaid && (
+                <p className="small faint" style={{ margin: '6px 0 0' }}>
+                  Nothing written down for them before. Whatever goes in here is on screen at the next stand-up.
+                </p>
+              )}
+            </div>
+
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               <div className="panel" style={{ flex: 1.4, minWidth: 300, borderColor: 'var(--accent)' }}>
                 <p className="panel-title" style={{ color: 'var(--accent)' }}>Capture</p>
@@ -287,6 +411,7 @@ export function Standup({ teamId }: { teamId: string }) {
               <span className="small faint">← → between people · B to capture a blocker · Esc to step out</span>
               {last ? (
                 <button className="btn primary" onClick={async () => {
+                  await flushSaid()
                   const s = await standups.summary(session)
                   await standups.end(session.id)
                   setFinished(s)

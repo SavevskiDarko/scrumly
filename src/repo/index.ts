@@ -8,7 +8,7 @@ export {
 } from './insights'
 export type { BoardIndex, Bucket, FlowStats, Load, OwnerField, Queue } from './insights'
 export { followUps } from './followUps'
-export { standups, rotate } from './standups'
+export { standups, rotate, runningOrder } from './standups'
 export type { StandupSummary } from './standups'
 export { people } from './people'
 export { teams } from './teams'
