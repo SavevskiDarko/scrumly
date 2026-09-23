@@ -16,6 +16,7 @@ import { Sprints } from './screens/Sprints'
 import { Board } from './screens/Board'
 import { FirstRun } from './screens/FirstRun'
 import { People } from './screens/People'
+import { PiPlanning } from './screens/PiPlanning'
 import { Settings } from './screens/Settings'
 import { Standup } from './screens/Standup'
 
@@ -71,6 +72,7 @@ function Inner() {
   else if (route.screen === 'boards') screen = <Boards />
   else if (route.screen === 'notes') screen = <Notes teamId={team.id} />
   else if (route.screen === 'sprints') screen = <Sprints teamId={team.id} />
+  else if (route.screen === 'pi') screen = <PiPlanning />
   else if (route.screen === 'canvas') {
     const boardId = route.params.get('board')
     screen = boardId

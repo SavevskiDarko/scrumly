@@ -133,3 +133,46 @@ export interface FollowUp { id: ID; title: string; dueDate: string | null; perso
 export interface Process { id: ID; name: string; boardId: ID | null; steps: unknown[] }
 export interface ProcessRun { id: ID; processId: ID; startedAt: number; completedAt: number | null; checks: Record<string, number> }
 export interface Standup { id: ID; teamId: ID; sprintId: ID | null; date: string; startedAt: number; endedAt: number | null; personOrder: ID[] }
+
+export interface ProgramIncrement {
+  id: ID
+  name: string
+  startDate: string
+  endDate: string
+  state: 'planning' | 'active' | 'closed'
+  teamIds: ID[]
+  createdAt: number
+  closedAt: number | null
+}
+
+/** A team's PI objective. Business value is set by the business owner, 1-10; stretch objectives are uncommitted. */
+export interface PiObjective {
+  id: ID
+  piId: ID
+  teamId: ID
+  title: string
+  businessValue: number
+  committed: boolean
+  actualValue: number | null
+  createdAt: number
+}
+
+export type RoamStatus = 'owned' | 'mitigated' | 'accepted' | 'resolved'
+
+export interface PiRisk {
+  id: ID
+  piId: ID
+  description: string
+  ownerPersonId: ID | null
+  status: RoamStatus
+  createdAt: number
+}
+
+/** One fist-of-five confidence vote per team per PI. */
+export interface PiVote {
+  id: ID
+  piId: ID
+  teamId: ID
+  vote: number
+  at: number
+}

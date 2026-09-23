@@ -1,11 +1,11 @@
 import Dexie, { type Table } from 'dexie'
 import type {
   Availability, Blocker, Board, BoardLink, Chase, Conversion, ExternalLink, FollowUp,
-  Note, Person, Process, ProcessRun, Settings, Sprint, SprintEvent, Standup, Status,
-  StatusEvent, Task, TaskLink, Team,
+  Note, Person, PiObjective, PiRisk, PiVote, Process, ProcessRun, ProgramIncrement, Settings,
+  Sprint, SprintEvent, Standup, Status, StatusEvent, Task, TaskLink, Team,
 } from './types'
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 export class ScrumlyDB extends Dexie {
   settings!: Table<Settings, number>
@@ -29,6 +29,10 @@ export class ScrumlyDB extends Dexie {
   standups!: Table<Standup, string>
   sprintEvents!: Table<SprintEvent, string>
   conversions!: Table<Conversion, string>
+  programIncrements!: Table<ProgramIncrement, string>
+  piObjectives!: Table<PiObjective, string>
+  piRisks!: Table<PiRisk, string>
+  piVotes!: Table<PiVote, string>
 
   constructor() {
     // The IndexedDB database is still called 'cadence' — the app's first name.
@@ -66,6 +70,15 @@ export class ScrumlyDB extends Dexie {
       sprintEvents: 'id, taskId, at, toSprintId',
       conversions: 'id, noteId, createdId',
     })
+
+    // v3 — PI Planning: a program increment spans several teams' sprints,
+    // each with its own objectives, ROAM risks, and confidence votes.
+    this.version(3).stores({
+      programIncrements: 'id, startDate, state, *teamIds',
+      piObjectives: 'id, piId, teamId',
+      piRisks: 'id, piId, status',
+      piVotes: 'id, piId, teamId, [piId+teamId]',
+    })
   }
 }
 
@@ -75,5 +88,5 @@ export const ALL_TABLE_NAMES = [
   'settings', 'teams', 'people', 'statuses', 'sprints', 'tasks', 'statusEvents',
   'taskLinks', 'externalLinks', 'blockers', 'chases', 'availability', 'boards',
   'boardLinks', 'notes', 'followUps', 'processes', 'processRuns', 'standups',
-  'sprintEvents', 'conversions',
+  'sprintEvents', 'conversions', 'programIncrements', 'piObjectives', 'piRisks', 'piVotes',
 ] as const
