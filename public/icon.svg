@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Full bleed, with the mark inside the middle 60%, so the same drawing
+       works as a plain icon and as Android's maskable (cropped) icon. -->
+  <rect width="512" height="512" fill="#2C4C9B"/>
+  <g fill="#FFFFFF">
+    <rect x="162" y="166" width="52" height="180" rx="12"/>
+    <rect x="230" y="166" width="52" height="124" rx="12" opacity=".8"/>
+    <rect x="298" y="166" width="52" height="72" rx="12" opacity=".6"/>
+  </g>
+</svg>

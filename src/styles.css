@@ -154,6 +154,11 @@ button,input,select,textarea{font:inherit;color:inherit}
 }
 .task:hover{border-color:var(--line-strong)}
 .task.dragging{opacity:.35}
+/* On a touch screen a card is picked up by pressing and holding, which Android
+   would otherwise read as selecting the text under the finger. */
+@media (pointer:coarse){
+  .task{touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+}
 .task.drop-target{box-shadow:0 -2px 0 var(--accent)}
 .task-top{display:flex;align-items:center;gap:6px}
 .task-key{font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums;letter-spacing:.01em}

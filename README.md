@@ -16,7 +16,8 @@ tab out of IndexedDB.
     npm test             # smoke tests for the repository layer
 
 Deploy `dist/` to any static host (Cloudflare Pages), or just open
-`dist-single/index.html` from disk.
+`dist-single/index.html` from disk. Hosted, it installs on an Android
+tablet as an app that works offline — see "On a tablet or phone".
 
 ## Slice 1 — the spine
 
@@ -378,6 +379,28 @@ it, so it lowers the risk rather than removing it — which is exactly why
 the folder exists.
 
 Export and restore by hand still work and still produce the same JSON.
+
+## On a tablet or phone
+
+The hosted build installs as an app. Deploy `dist/` to any HTTPS host, open
+it in Chrome on Android, and use **⋮ → Install app** (or Add to Home
+screen). It opens full-screen from its own icon and works with no
+connection: every file in the build is cached the first time it loads.
+
+- The data is the browser's, on that device, exactly as in "Storage in the
+  browser" above. Installing does not sync anything; moving data between
+  the tablet and a computer is a backup exported on one and restored on
+  the other
+- A new deploy downloads in the background and takes over the next time
+  the app is opened from closed, never under an open window
+- On a touch screen a card is picked up by pressing and holding it. A
+  finger that moves straight away scrolls the board instead
+- `npm run dev` and the desktop app never register the service worker, so
+  nothing gets cached over hot reload. The single-file build has no
+  manifest or worker and cannot be installed
+
+The worker is `pwa/sw.js`; `vite.config.ts` fills in its file list and
+version on every `npm run build`.
 
 ## About the name
 
