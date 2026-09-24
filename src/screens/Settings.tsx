@@ -4,6 +4,7 @@ import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
 import { useAutoSaveApi } from '../components/AutoSaveProvider'
 import { useDesktop } from '../desktop/DesktopProvider'
+import { SyncPanel } from '../sync/SyncPanel'
 import { fileSize, isDesktop } from '../desktop/bridge'
 import { formatDate } from '../lib/dates'
 import { LIVE_FILE, fileStore } from '../repo/fileStore'
@@ -375,6 +376,8 @@ export function Settings() {
           )}
         </div>
         )}
+
+        <SyncPanel />
 
         <div className="panel">
           <p className="panel-title">Backup</p>

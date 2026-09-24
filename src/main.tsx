@@ -1,6 +1,8 @@
-/// <reference types="vite/client" />
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+// Before anything touches the database: the tracker has to see every write.
+import './sync/tracker'
+import './sync/engine'
 import App from './App'
 import './styles.css'
 

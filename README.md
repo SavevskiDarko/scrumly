@@ -404,6 +404,39 @@ connection: every file in the build is cached the first time it loads.
 The worker is `pwa/sw.js`; `vite.config.ts` fills in its file list and
 version on every `npm run build`.
 
+## Sync across devices
+
+Optional, and off until it is pointed at a Supabase project. Signed in with
+the same account, the laptop, the tablet and the phone share one set of
+data. IndexedDB (and the desktop app's file) stays the live store, so every
+device still works with no connection; `src/sync/` just moves rows.
+
+- Every write is noticed by Dexie middleware (`src/sync/tracker.ts`), so no
+  repo function has to remember to tell sync. The row is sent as it is a
+  moment later; a row that is gone is sent as deleted
+- Other devices hear about it over Supabase realtime, and pull anything
+  they missed when they come back to the foreground or online
+- Per row, the later save wins. A row with an unsent change on this device
+  is never overwritten by an incoming one
+- The first sign-in on a device: an empty account takes this device's data,
+  an empty device takes the account's, and if both have some you choose
+- Restoring a backup while signed in replaces the data on every device
+
+Setting it up, once:
+
+1. Create a free project at https://supabase.com
+2. SQL Editor → New query → paste `supabase/schema.sql` → Run
+3. Authentication → Users → Add user → Create new user, with your email and
+   a password, and tick Auto Confirm User
+4. Authentication → Sign In / Providers → turn off Allow new users to sign
+   up, so nobody else can make an account on your project
+5. Project Settings → API: put the Project URL and the anon (publishable)
+   key into `src/sync/config.ts`, or set `VITE_SUPABASE_URL` and
+   `VITE_SUPABASE_ANON_KEY` when building. Both are safe to publish; row
+   level security means a signed-in user only ever reaches their own rows
+
+Then Settings → Sync across devices → sign in, on each device.
+
 ## About the name
 
 The app was called Cadence during design. Two things kept the old name

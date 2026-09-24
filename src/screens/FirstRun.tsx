@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useToast } from '../components/Toast'
+import { FirstRunSync } from '../sync/SyncPanel'
 import { formatDate } from '../lib/dates'
 import { addDays, nextWeekday, people as peopleRepo, settings as settingsRepo, statuses as statusRepo, teams as teamRepo } from '../repo'
 
@@ -126,6 +127,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
           <p className="small faint" style={{ marginTop: 14, marginBottom: 0 }}>
             No account and no password. Everything is stored in this browser on this machine — which is why the first thing to do after adding real work is export a backup from Settings.
           </p>
+          <FirstRunSync />
         </div>
       </div>
     </div>
