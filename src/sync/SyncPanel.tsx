@@ -1,5 +1,7 @@
+import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { useToast } from '../components/Toast'
+import { db } from '../db/schema'
 import { syncConfigured } from './config'
 import { sync } from './engine'
 import { useSync } from './useSync'
@@ -63,6 +65,7 @@ function Choose({ cloudRows }: { cloudRows: number }) {
 export function SyncPanel() {
   const s = useSync()
   const toast = useToast()
+  const keptHere = useLiveQuery(() => db.teams.filter((t) => t.localOnly === true).toArray(), [], [])
 
   if (!syncConfigured()) {
     return (
@@ -118,6 +121,7 @@ export function SyncPanel() {
           <p className="small faint" style={{ marginTop: 10, marginBottom: 0 }}>
             When two devices change the same item, the later save wins. Restoring a backup here replaces the data on every
             signed-in device.
+            {keptHere.length > 0 && ` Not synced: ${keptHere.map((t) => t.name).join(', ')}, kept on this computer only.`}
           </p>
         </>
       )}

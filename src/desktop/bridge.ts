@@ -18,6 +18,8 @@ export interface DesktopInfo {
   modifiedAt: number | null
   /** False once the folder has been moved out of %APPDATA% from Settings. */
   isDefault: boolean
+  /** Where teams kept on this computer only are written instead. Never moves. */
+  localDir?: string
 }
 
 export interface DesktopWrite {
@@ -56,6 +58,10 @@ export interface DesktopApi {
   info(): Promise<DesktopInfo>
   load(): Promise<unknown | null>
   save(snapshot: Snapshot): Promise<DesktopWrite>
+  /** What is kept on this computer only. Absent in desktop builds from before it could be. */
+  loadLocal?(): Promise<unknown | null>
+  /** Null when nothing is kept here and never has been, so nothing was written. */
+  saveLocal?(snapshot: Snapshot): Promise<DesktopWrite | null>
   chooseDir(): Promise<DesktopInfo | null>
   reveal(): Promise<void>
   /** Absent in desktop builds from before the Jira import. */

@@ -455,7 +455,7 @@ desktop app.
 - **Desktop only.** Jira's API does not answer a web page from another
   origin, so the browser build cannot call it. The desktop app's main process
   can (`electron/jira.cjs`), and what it imports reaches every other device
-  through sync
+  through sync — unless the team is kept on this computer only (below)
 - **The token never enters the database.** It is encrypted with the OS
   (DPAPI on Windows) into the app's userData folder — not the data folder,
   which can be moved into a synced drive or this repo. The renderer hands it
@@ -482,6 +482,32 @@ desktop app.
   reads six), and optionally the backlog. An issue that leaves a pulled
   sprint is looked up on its own; if Jira no longer has it, neither does
   Scrumly
+
+### Keeping a team on this computer only
+
+For a company board that must not leave a work laptop: Settings → Jira →
+**Keep … on this computer only**. The team and everything that hangs off it
+— tasks, sprints, their history, blockers, dependencies, stand-ups, notes,
+and people (with their KPIs) who are in no other team — then never leave the
+machine. `src/repo/localOnly.ts` decides what "hangs off it" means, and
+everything below asks it:
+
+- **Sync** sends each of those rows as deleted, which clears the synced copy
+  and every other device. Nothing arriving from the cloud may touch them: a
+  deletion is ignored, and a live copy from a device that had not heard yet
+  is not applied and is deleted from the cloud in turn
+- **Backups, the browser's folder copy and the desktop data file** leave them
+  out, so `npm run save` never commits them. The desktop app writes them to
+  `this-computer-only/` under its userData folder instead, same layout as the
+  data folder, and loads it back alongside the data file. That folder never
+  moves, the same reason the Jira token lives next to it
+- **Restoring a backup** replaces everything else and leaves the team as it is
+- Turning it off sends it all back again
+
+Copies made before it was turned on are not touched: backups already
+exported, earlier days under `history/`, and anything already committed.
+Someone who is also in a team that syncs travels with that team, carrying
+the Jira account id an import matched them to.
 
 ## About the name
 

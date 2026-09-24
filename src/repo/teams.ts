@@ -45,6 +45,15 @@ export const teams = {
     await db.teams.update(id, { standupOrder: order ?? [] })
   },
 
+  /**
+   * Keeps the team on this computer only, or lets it travel again. Only the
+   * flag: telling the synced copy about it is sync's job (keepOnThisComputer).
+   */
+  async setLocalOnly(id: ID, on: boolean) {
+    // Undefined in update() is Dexie for "remove this property".
+    await db.teams.update(id, { localOnly: on ? true : undefined })
+  },
+
   /** Refuses while the team still owns work — losing a board to a stray click is not acceptable. */
   async remove(id: ID): Promise<{ ok: boolean; reason?: string }> {
     const taskCount = await db.tasks.where('teamId').equals(id).count()

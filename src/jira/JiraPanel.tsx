@@ -6,6 +6,7 @@ import type { Status, Team } from '../db/types'
 import { jiraBridge, type JiraConnection } from '../desktop/bridge'
 import { settings as settingsRepo } from '../repo'
 import { autoColumn, jiraLinks, type JiraBoard, type JiraBoardConfig, type JiraStatus } from '../repo/jira'
+import { keepOnThisComputer } from '../sync/rows'
 import { boardStatuses, pullTeam, searchBoards } from './pull'
 import { AUTO_PULL_MINUTES } from './useJiraAutoPull'
 
@@ -236,6 +237,51 @@ function Linked({ team, conn }: { team: Team; conn: JiraConnection }) {
   )
 }
 
+/**
+ * The switch that keeps a team on this computer only. Shown for a team that
+ * follows a board, since that is where a company's data comes in, and for one
+ * already kept here, so it can always be switched back.
+ */
+function KeepHere({ team }: { team: Team }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const on = team.localOnly === true
+
+  async function toggle(next: boolean) {
+    const ok = confirm(next
+      ? `Keep ${team.name} on this computer only?\n\n` +
+        'Its tasks, sprints, history, blockers, stand-ups and notes, and anyone who is only in this team, stop being ' +
+        'synced, exported in backups or written to the data folder. The synced copy and your other devices lose them.\n\n' +
+        'Copies made before now are not touched: backups already exported, earlier days under history/ in the data ' +
+        'folder, and anything already committed with npm run save.'
+      : `Let ${team.name} leave this computer again?\n\n` +
+        'It goes back into the data folder and backups, and — if you are signed in — the synced copy and your other devices.')
+    if (!ok) return
+    setBusy(true)
+    try {
+      await keepOnThisComputer(team.id, next)
+      toast(next ? `${team.name} is kept on this computer only` : `${team.name} is synced and backed up again`)
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not change that', true)
+    }
+    setBusy(false)
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+      <label className="jira-check">
+        <input type="checkbox" checked={on} disabled={busy} onChange={(e) => void toggle(e.target.checked)} />
+        Keep {team.name} on this computer only
+      </label>
+      <p className="small faint" style={{ margin: 0 }}>
+        {on
+          ? `Nothing of ${team.name} is synced, exported in a backup or written to the data folder. It is saved on this computer only, in a folder of its own that never moves.`
+          : 'For a company board that should not leave a work laptop: the team and everything in it are left out of sync, backups and the data folder.'}
+      </p>
+    </div>
+  )
+}
+
 export function JiraPanel() {
   const bridge = jiraBridge()
   const cfg = useLiveQuery(() => settingsRepo.get(), [])
@@ -265,7 +311,8 @@ export function JiraPanel() {
         <p className="panel-title">Jira</p>
         <p className="muted" style={{ marginTop: 0, marginBottom: linked.length ? 10 : 0 }}>
           Pulling sprints and issues from Jira runs in the Scrumly desktop app: Jira does not answer a web page
-          directly. Link a board there, and what it brings in reaches this device through sync.
+          directly. Link a board there, and what it brings in reaches this device through sync — unless that team is
+          kept on that computer only.
         </p>
         {linked.map((t) => (
           <div key={t.id} className="small">
@@ -289,10 +336,14 @@ export function JiraPanel() {
       {!conn ? (
         <p className="small faint" style={{ margin: 0 }}>Checking…</p>
       ) : !conn.connected ? (
-        <Connect encryption={conn.encryption} onDone={refresh} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Connect encryption={conn.encryption} onDone={refresh} />
+          {team?.localOnly && <KeepHere team={team} />}
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {team && (team.jira ? <Linked team={team} conn={conn} /> : <FindBoard team={team} site={conn.site!} />)}
+          {team && (team.jira || team.localOnly) && <KeepHere team={team} />}
           {otherList}
           <div style={{ paddingTop: 10, borderTop: '1px solid var(--line)' }}>
             <button className="btn ghost sm" onClick={async () => {
