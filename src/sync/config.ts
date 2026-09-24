@@ -5,9 +5,10 @@
  * signed-in user can only reach their own rows.
  *
  * VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY override these at build time.
- * Leave both empty and the app behaves exactly as it did before sync existed.
+ * Set both to empty strings and the app behaves exactly as it did before sync
+ * existed.
  */
-export const SUPABASE_URL: string = import.meta.env.VITE_SUPABASE_URL ?? ''
-export const SUPABASE_ANON_KEY: string = import.meta.env.VITE_SUPABASE_ANON_KEY ?? ''
+export const SUPABASE_URL: string = import.meta.env.VITE_SUPABASE_URL ?? 'https://ssdysetultzbxwmrmpzi.supabase.co'
+export const SUPABASE_ANON_KEY: string = import.meta.env.VITE_SUPABASE_ANON_KEY ?? 'sb_publishable_rYw59aeNiVwOjAFr7uk4qw_BOfdIVCD'
 
 export const syncConfigured = (): boolean => Boolean(SUPABASE_URL && SUPABASE_ANON_KEY)
