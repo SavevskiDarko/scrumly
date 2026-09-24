@@ -5,6 +5,7 @@ import { db } from '../db/schema'
 import type { StatusEvent, Task } from '../db/types'
 import { go, setParam } from '../hooks/useRoute'
 import { useTeamPeople } from '../hooks/useTeamPeople'
+import { formatDate, formatDateWithWeekday } from '../lib/dates'
 import {
   blockedDays, blockers as blockerRepo, buildIndex, daysInStatus, describeWaitingOn,
   filterByBucket, followUps as fuRepo, loadByPerson, queues, settings as settingsRepo,
@@ -91,7 +92,7 @@ export function Today({ teamId }: { teamId: string }) {
   const chaseCount = new Map<string, number>()
   for (const c of chases) chaseCount.set(c.blockerId, (chaseCount.get(c.blockerId) ?? 0) + 1)
 
-  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
+  const today = formatDateWithWeekday(new Date())
   const openTask = (id: string) => setParam('task', id)
   const showBucket = (b: Bucket) => go('board', { filter: b })
   const nothingWrong = blocked.length + stuck.length + overdue.length + unowned.length === 0
@@ -189,7 +190,7 @@ export function Today({ teamId }: { teamId: string }) {
               {overdue.length > 0 && (
                 <>
                   <div className="attn-head">Past their due date</div>
-                  {overdue.map((t) => attnRow(t, `due ${t.dueDate}`, 'overdue'))}
+                  {overdue.map((t) => attnRow(t, `due ${formatDate(t.dueDate)}`, 'overdue'))}
                 </>
               )}
 

@@ -22,6 +22,13 @@ export interface Team {
   nextTaskNumber: number
   createdAt: number
   archivedAt: number | null
+  /**
+   * The order stand-ups run in, when it has been arranged by hand. Absent on
+   * teams created before the Stand-up screen could arrange one, and on teams
+   * that have never been arranged — both mean "rotate alphabetically", which
+   * is what every stand-up did before this existed.
+   */
+  standupOrder?: ID[]
 }
 
 export interface Person {
@@ -135,6 +142,27 @@ export interface FollowUp { id: ID; title: string; dueDate: string | null; perso
 export interface Process { id: ID; name: string; boardId: ID | null; steps: unknown[] }
 export interface ProcessRun { id: ID; processId: ID; startedAt: number; completedAt: number | null; checks: Record<string, number> }
 export interface Standup { id: ID; teamId: ID; sprintId: ID | null; date: string; startedAt: number; endedAt: number | null; personOrder: ID[] }
+
+/**
+ * What somebody actually said at a stand-up, in their own words. One per
+ * person per stand-up.
+ *
+ * Deliberately not a Note: those are written by you, about a meeting or a
+ * person, and live on the Notes screen. This is a line typed while somebody is
+ * still talking, and its whole job is to be on screen again tomorrow.
+ *
+ * `at` is the stand-up's start, not the moment the text was typed, so "the one
+ * before this" stays correct even if a note is edited days later.
+ */
+export interface StandupNote {
+  id: ID
+  standupId: ID
+  teamId: ID
+  personId: ID
+  text: string
+  date: string
+  at: number
+}
 
 export interface ProgramIncrement {
   id: ID

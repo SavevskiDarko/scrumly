@@ -34,6 +34,17 @@ export const teams = {
     await db.teams.update(id, next)
   },
 
+  /**
+   * Remembers the order stand-ups should run in. Passing null forgets it, and
+   * the team goes back to rotating alphabetically.
+   */
+  async setStandupOrder(id: ID, order: ID[] | null) {
+    // An empty array rather than undefined: Dexie's meaning for an undefined
+    // value in update() is "delete this property", which is a subtlety nobody
+    // reading this should have to know. Empty and absent are read the same way.
+    await db.teams.update(id, { standupOrder: order ?? [] })
+  },
+
   /** Refuses while the team still owns work — losing a board to a stray click is not acceptable. */
   async remove(id: ID): Promise<{ ok: boolean; reason?: string }> {
     const taskCount = await db.tasks.where('teamId').equals(id).count()
@@ -43,11 +54,14 @@ export const teams = {
     const total = await db.teams.count()
     if (total <= 1) return { ok: false, reason: 'You need at least one team' }
 
-    await db.transaction('rw', db.teams, db.people, db.standups, async () => {
+    await db.transaction('rw', db.teams, db.people, db.standups, db.standupNotes, async () => {
       const members = await db.people.where('teamIds').equals(id).toArray()
       for (const m of members) {
         await db.people.update(m.id, { teamIds: m.teamIds.filter((t) => t !== id) })
       }
+      // The notes go with the stand-ups they belong to; orphaned rows would
+      // otherwise surface against people who joined another team.
+      await db.standupNotes.where('teamId').equals(id).delete()
       await db.standups.where('teamId').equals(id).delete()
       await db.teams.delete(id)
     })

@@ -16,10 +16,11 @@ import {
   availability as availRepo, blockers as blockerRepo, buildIndex, capacityPlan,
   settings as settingsRepo, sprints as sprintRepo, tasks as taskRepo, velocity, type BoardIndex,
 } from '../repo'
+import { formatDate } from '../lib/dates'
 
-function fmt(iso: string) {
-  return new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
-}
+// One argument only: it is passed straight to .map(), which would hand
+// formatDate the index as its fallback.
+const fmt = (iso: string) => formatDate(iso)
 
 const isWeekday = (iso: string) => {
   const d = new Date(`${iso}T12:00:00`).getDay()

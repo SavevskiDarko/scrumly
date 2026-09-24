@@ -1,10 +1,11 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Suspense, lazy, useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { AutoSaveProvider } from './components/AutoSaveProvider'
+import { DesktopProvider, useDesktop } from './desktop/DesktopProvider'
 import { Shell } from './components/Shell'
 import { requestPersistentStorage } from './repo/fileStore'
 import { TaskDrawer } from './components/TaskDrawer'
-import { ToastHost } from './components/Toast'
+import { ToastHost, useToast } from './components/Toast'
 import { db } from './db/schema'
 import { useRoute } from './hooks/useRoute'
 import { CommandPalette } from './components/CommandPalette'
@@ -27,6 +28,28 @@ const CanvasEditor = lazy(() => import('./canvas/CanvasEditor'))
 import { Today } from './screens/Today'
 import { settings as settingsRepo } from './repo'
 
+/**
+ * Says so, once, when the desktop app has just read everything back off disk.
+ * A reinstall that silently looks correct is indistinguishable from one that
+ * silently lost everything, so the one case worth a sentence is the good one.
+ */
+function useRestoredNotice() {
+  const toast = useToast()
+  const { status } = useDesktop()
+  const told = useRef(false)
+
+  useEffect(() => {
+    if (told.current) return
+    if (status.boot === 'restored' && status.restored) {
+      told.current = true
+      toast(`Loaded ${status.restored.tasks} tasks and ${status.restored.people} people from disk`)
+    } else if (status.boot === 'held') {
+      told.current = true
+      toast(status.error ?? 'Scrumly could not read its data file — nothing has been written', true)
+    }
+  }, [status.boot, status.restored, status.error, toast])
+}
+
 function Inner() {
   const route = useRoute()
   const [ready, setReady] = useState(false)
@@ -36,6 +59,8 @@ function Inner() {
   // No default: an empty array while the query is still running looks exactly
   // like "no teams yet", which flashed setup at people who were already set up.
   const teams = useLiveQuery(() => db.teams.orderBy('name').toArray(), [])
+
+  useRestoredNotice()
 
   useEffect(() => {
     settingsRepo.ensure().then(() => setReady(true))
@@ -105,9 +130,14 @@ function Inner() {
 export default function App() {
   return (
     <ToastHost>
-      <AutoSaveProvider>
-        <Inner />
-      </AutoSaveProvider>
+      {/* Outermost of the two stores on purpose: the desktop file is read, and
+          the database restored from it, before anything below mounts and
+          starts asking the database questions. */}
+      <DesktopProvider>
+        <AutoSaveProvider>
+          <Inner />
+        </AutoSaveProvider>
+      </DesktopProvider>
     </ToastHost>
   )
 }

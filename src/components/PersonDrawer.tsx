@@ -4,18 +4,14 @@ import { db } from '../db/schema'
 import type { ID, Kpi, KpiSource } from '../db/types'
 import { useKpiReadings } from '../hooks/useKpis'
 import { go, setParam } from '../hooks/useRoute'
+import { formatDate } from '../lib/dates'
 import {
   BOARD_SOURCES, KPI_SOURCES, KPI_TEMPLATES, formatKpiValue, kpiSummary, kpis as repo, notes as notesRepo,
   todayISO, type KpiReading,
 } from '../repo'
 import { Avatar } from './Avatar'
+import { DateField } from './DateField'
 import { useToast } from './Toast'
-
-function when(iso: string) {
-  const d = new Date(`${iso}T12:00:00`)
-  const sameYear = d.getFullYear() === new Date().getFullYear()
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: sameYear ? undefined : 'numeric' })
-}
 
 /** Reads a number field the way the task size field does: blank or junk is "none". */
 function numberOrNull(raw: string): number | null {
@@ -91,7 +87,7 @@ function KpiCard({ reading, open, onToggle }: { reading: KpiReading; open: boole
         {latest ? (
           <>
             <span className="metric-n">{formatKpiValue(latest.value, kpi.unit)}</span>
-            <span className="small faint">{latest.label || when(latest.date)}</span>
+            <span className="small faint">{latest.label || formatDate(latest.date)}</span>
             {delta != null && delta !== 0 && (
               <span className={`small metric-delta ${improved ? 'up' : 'down'}`} title="Change since the reading before">
                 {delta > 0 ? '▲' : '▼'} {formatKpiValue(Math.abs(delta), kpi.unit)}
@@ -117,8 +113,8 @@ function KpiCard({ reading, open, onToggle }: { reading: KpiReading; open: boole
             aria-label={`New reading for ${kpi.name}`} value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') void record() }} />
-          <input className="input date" type="date" aria-label="Reading date" value={date}
-            onChange={(e) => setDate(e.target.value)} />
+          <DateField value={date} label="Reading date" style={{ width: 138, flex: 'none' }}
+            onCommit={(iso) => { if (iso) setDate(iso) }} />
           <input className="input note" placeholder="Note (optional)" aria-label="Note" value={note}
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') void record() }} />
@@ -166,7 +162,7 @@ function KpiCard({ reading, open, onToggle }: { reading: KpiReading; open: boole
               <div className="metric-hist">
                 {[...series].reverse().map((p) => (
                   <div key={p.entryId ?? `${p.label}-${p.date}`} className="metric-hist-row">
-                    <span className="small faint when">{p.label || when(p.date)}</span>
+                    <span className="small faint when">{p.label || formatDate(p.date)}</span>
                     <span className="v">{formatKpiValue(p.value, kpi.unit)}</span>
                     <span className="small muted n" title={p.note}>{p.note}</span>
                     {p.entryId && (

@@ -154,6 +154,11 @@ button,input,select,textarea{font:inherit;color:inherit}
 }
 .task:hover{border-color:var(--line-strong)}
 .task.dragging{opacity:.35}
+/* On a touch screen a card is picked up by pressing and holding, which Android
+   would otherwise read as selecting the text under the finger. */
+@media (pointer:coarse){
+  .task{touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+}
 .task.drop-target{box-shadow:0 -2px 0 var(--accent)}
 .task-top{display:flex;align-items:center;gap:6px}
 .task-key{font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums;letter-spacing:.01em}
@@ -325,6 +330,29 @@ button,input,select,textarea{font:inherit;color:inherit}
 .standup-task.blocked{border-left:2px solid var(--alert);background:var(--alert-soft)}
 .standup-foot{display:flex;align-items:center;gap:12px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
 .standup-foot .small{flex:1;text-align:center}
+/* Yesterday's words sit directly above today's box, so reading one and typing
+   the other is a glance rather than a scroll. */
+.said-last{
+  border-left:2px solid var(--accent);background:var(--accent-soft);border-radius:0 5px 5px 0;
+  padding:7px 10px;margin-bottom:8px;font-size:12.5px;
+}
+.said-last-when{display:block;font-size:10.5px;font-weight:650;color:var(--faint);margin-bottom:2px}
+.said-box{width:100%;resize:vertical;min-height:58px;line-height:1.45}
+
+.standup-order{display:flex;flex-direction:column;gap:4px}
+.standup-order-row{
+  display:flex;align-items:center;gap:8px;padding:5px 7px;border:1px solid var(--line);
+  border-radius:var(--r);background:var(--surface);font-size:12.5px;
+}
+.standup-order-row:hover{border-color:var(--line-strong)}
+/* The grip is the drag target, so it gets the cursor; the row itself stays
+   selectable text. touch-action is what stops a phone scrolling mid-drag. */
+.standup-order-grip{
+  flex:none;cursor:grab;color:var(--faint);line-height:1;padding:0 2px;
+  touch-action:none;user-select:none;
+}
+.standup-order-grip:active{cursor:grabbing}
+
 .pip{width:8px;height:8px;border-radius:50%;border:0;padding:0;cursor:pointer;background:var(--surface-3)}
 .pip.done{background:var(--muted)}
 .pip.now{background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
@@ -352,7 +380,12 @@ button,input,select,textarea{font:inherit;color:inherit}
 
 .seg.sm button{padding:2px 8px;font-size:11px}
 
-@media (max-width:760px){.menu-toggle{display:inline-flex}}
+/* The menu button is fixed, so it is out of flow — the screen's top bar has to
+   leave a lane for it or the title renders underneath. */
+@media (max-width:760px){
+  .menu-toggle{display:inline-flex}
+  .main > .topbar{padding-left:72px}
+}
 
 /* ---------- slice 4: canvas ---------- */
 .canvas-stage{flex:1;min-height:0;position:relative}
@@ -508,7 +541,6 @@ button,input,select,textarea{font:inherit;color:inherit}
 .metric-record{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .metric-record .input{padding:4px 7px;font-size:12px}
 .metric-record .val{width:84px;flex:none}
-.metric-record .date{width:134px;flex:none}
 .metric-record .note{flex:1;min-width:80px;width:auto}
 .metric-more{display:flex;flex-direction:column;gap:12px;padding-top:10px;border-top:1px solid var(--line)}
 .meta-grid .seg{justify-self:start}

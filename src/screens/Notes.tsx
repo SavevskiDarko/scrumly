@@ -6,13 +6,11 @@ import { db } from '../db/schema'
 import type { Conversion, FollowUp, Note, NoteType, Sprint, Status, Task } from '../db/types'
 import { setParam, useRoute } from '../hooks/useRoute'
 import { useTeamPeople } from '../hooks/useTeamPeople'
+import { formatDate } from '../lib/dates'
 import {
   NOTE_TYPES, actionOutcomes, followUps as fuRepo, notes as repo, sprints as sprintRepo, todayISO,
 } from '../repo'
 
-function when(ts: number) {
-  return new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-}
 const labelOf = (t: NoteType) => NOTE_TYPES.find((x) => x.value === t)?.label ?? t
 
 /**
@@ -82,7 +80,7 @@ function LastRetro({ note, tasks, follow, statuses, onOpenNote }: {
       </p>
       <div style={{ marginBottom: outcomes.length ? 9 : 0 }}>
         <button className="linkish small" style={{ fontWeight: 500 }} onClick={() => onOpenNote(prev.id)}>{prev.title}</button>
-        <span className="small faint"> · {when(prev.createdAt)}</span>
+        <span className="small faint"> · {formatDate(prev.createdAt)}</span>
       </div>
       {outcomes.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -226,7 +224,7 @@ export function Notes({ teamId }: { teamId: string }) {
             <button key={n.id} className={`note-row${n.id === selected ? ' on' : ''}`} onClick={() => setSelected(n.id)}>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <span className="chip">{labelOf(n.type)}</span>
-                <span className="small faint">{when(n.updatedAt)}</span>
+                <span className="small faint">{formatDate(n.updatedAt)}</span>
                 {n.isPrivate && <span className="chip solid">private</span>}
               </div>
               <b style={{ fontSize: 12.5, marginTop: 4, display: 'block' }}>{n.title}</b>

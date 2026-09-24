@@ -2,10 +2,10 @@ import Dexie, { type Table } from 'dexie'
 import type {
   Availability, Blocker, Board, BoardLink, Chase, Conversion, ExternalLink, FollowUp, Kpi, KpiEntry,
   Note, Person, PiObjective, PiRisk, PiVote, Process, ProcessRun, ProgramIncrement, Settings,
-  Sprint, SprintEvent, Standup, Status, StatusEvent, Task, TaskLink, Team,
+  Sprint, SprintEvent, Standup, StandupNote, Status, StatusEvent, Task, TaskLink, Team,
 } from './types'
 
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 export class ScrumlyDB extends Dexie {
   settings!: Table<Settings, number>
@@ -29,6 +29,7 @@ export class ScrumlyDB extends Dexie {
   standups!: Table<Standup, string>
   sprintEvents!: Table<SprintEvent, string>
   conversions!: Table<Conversion, string>
+  standupNotes!: Table<StandupNote, string>
   programIncrements!: Table<ProgramIncrement, string>
   piObjectives!: Table<PiObjective, string>
   piRisks!: Table<PiRisk, string>
@@ -73,18 +74,31 @@ export class ScrumlyDB extends Dexie {
       conversions: 'id, noteId, createdId',
     })
 
-    // v3 — PI Planning: a program increment spans several teams' sprints,
-    // each with its own objectives, ROAM risks, and confidence votes.
+    // v3 — what each person said at each stand-up. Adding a store only, same
+    // as v2, so every existing row comes across untouched and a backup written
+    // under v1 or v2 still restores.
     this.version(3).stores({
+      standupNotes: 'id, standupId, personId, teamId, at, [standupId+personId]',
+    })
+
+    // v4 — PI Planning: a program increment spans several teams' sprints,
+    // each with its own objectives, ROAM risks, and confidence votes.
+    //
+    // These arrived written as v3, at the same time stand-up notes did, and two
+    // different definitions of one version number is how a database ends up
+    // missing half its tables: Dexie runs an upgrade once, so whichever
+    // definition got there first would be the only one that ever applied. They
+    // are numbered in the order they reached this branch.
+    this.version(4).stores({
       programIncrements: 'id, startDate, state, *teamIds',
       piObjectives: 'id, piId, teamId',
       piRisks: 'id, piId, status',
       piVotes: 'id, piId, teamId, [piId+teamId]',
     })
 
-    // v4 — personal KPIs: what each person is measured on, and the readings
+    // v5 — personal KPIs: what each person is measured on, and the readings
     // typed in for the hand-tracked ones. Board-read KPIs store no readings.
-    this.version(4).stores({
+    this.version(5).stores({
       kpis: 'id, personId',
       kpiEntries: 'id, kpiId, [kpiId+date]',
     })
@@ -97,6 +111,7 @@ export const ALL_TABLE_NAMES = [
   'settings', 'teams', 'people', 'statuses', 'sprints', 'tasks', 'statusEvents',
   'taskLinks', 'externalLinks', 'blockers', 'chases', 'availability', 'boards',
   'boardLinks', 'notes', 'followUps', 'processes', 'processRuns', 'standups',
-  'sprintEvents', 'conversions', 'programIncrements', 'piObjectives', 'piRisks', 'piVotes',
+  'sprintEvents', 'conversions', 'standupNotes',
+  'programIncrements', 'piObjectives', 'piRisks', 'piVotes',
   'kpis', 'kpiEntries',
 ] as const

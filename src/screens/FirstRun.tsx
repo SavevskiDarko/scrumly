@@ -2,15 +2,12 @@ import { useRef, useState } from 'react'
 import { useAutoSaveApi } from '../components/AutoSaveProvider'
 import { useToast } from '../components/Toast'
 import { LIVE_FILE, fileStore } from '../repo/fileStore'
+import { FirstRunSync } from '../sync/SyncPanel'
+import { formatDate } from '../lib/dates'
 import { addDays, backup, nextWeekday, people as peopleRepo, settings as settingsRepo, statuses as statusRepo, teams as teamRepo } from '../repo'
 
 const ROLES = ['Developer', 'QA', 'Tech lead', 'Designer', 'Product owner']
 type Draft = { name: string; role: string }
-
-/** Reads an ISO date at midday so formatting never lands on the previous day. */
-function fmt(iso: string) {
-  return new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })
-}
 
 export function FirstRun({ onDone }: { onDone: () => void }) {
   const toast = useToast()
@@ -162,7 +159,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
               ))}
             </div>
             <span className="small faint" style={{ marginTop: 6 }}>
-              Your first sprint would run {fmt(start)} to {fmt(end)}. You can change the length, and plan sprints, from the Sprints screen.
+              Your first sprint would run {formatDate(start)} to {formatDate(end)}. You can change the length, and plan sprints, from the Sprints screen.
             </span>
           </div>
 
@@ -199,6 +196,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
             No account and no password. Everything is stored in this browser on this machine — which is why the first
             thing to do after adding real work is connect a folder in Settings, so this is never the only copy.
           </p>
+          <FirstRunSync />
         </div>
       </div>
     </div>

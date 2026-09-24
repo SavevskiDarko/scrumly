@@ -3,6 +3,11 @@ import { useRef, useState } from 'react'
 import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
 import { useAutoSaveApi } from '../components/AutoSaveProvider'
+import { useDesktop } from '../desktop/DesktopProvider'
+import { SyncPanel } from '../sync/SyncPanel'
+import { fileSize, isDesktop } from '../desktop/bridge'
+import { DateField } from '../components/DateField'
+import { formatDate, formatDateWithWeekday } from '../lib/dates'
 import { LIVE_FILE, fileStore } from '../repo/fileStore'
 import {
   backup, people as peopleRepo, saveTextFile, settings as settingsRepo, statuses as statusRepo,
@@ -23,6 +28,8 @@ function numberOrNull(raw: string): number | null {
 export function Settings() {
   const toast = useToast()
   const auto = useAutoSaveApi()
+  const desk = useDesktop()
+  const onDesktop = isDesktop()
   const fileRef = useRef<HTMLInputElement>(null)
   const [newStatus, setNewStatus] = useState('')
   const [newTeam, setNewTeam] = useState('')
@@ -91,6 +98,24 @@ export function Settings() {
     toast(result.ok
       ? `Restored ${result.counts?.tasks ?? 0} tasks and ${result.counts?.people ?? 0} people`
       : result.error ?? 'Could not restore that file', !result.ok)
+  }
+
+  /**
+   * The desktop app loads this file for you at startup when the database is
+   * empty. This button is the other direction — the file is known-good and
+   * what is loaded is not — so it asks with the same real numbers as a restore.
+   */
+  async function loadFromDataFile() {
+    const ok = confirm(
+      'Load everything from the data file?\n\n' +
+      `This replaces what is currently open — ${counts.tasks} tasks, ${counts.people} people and ` +
+      `${counts.events} recorded moves — and cannot be undone.`,
+    )
+    if (!ok) return
+    const result = await desk.loadFromFile()
+    toast(result.ok
+      ? `Loaded ${result.counts?.tasks ?? 0} tasks and ${result.counts?.people ?? 0} people`
+      : result.error ?? 'Could not read the data file', !result.ok)
   }
 
   async function doImport(file: File) {
@@ -206,7 +231,7 @@ export function Settings() {
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
               {upcoming.map((d) => (
                 <span key={d} className="chip">
-                  {new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                  {formatDateWithWeekday(d)}
                   <button className="chip-x" title="Remove" onClick={() => void settingsRepo.removeHoliday(d)}>×</button>
                 </span>
               ))}
@@ -214,8 +239,8 @@ export function Settings() {
               {pastHolidays > 0 && <span className="small faint">and {pastHolidays} past</span>}
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-              <input className="input" type="date" style={{ width: 160 }} value={newHoliday}
-                onChange={(e) => setNewHoliday(e.target.value)} />
+              <DateField value={newHoliday || null} clearable label="Holiday" style={{ width: 160 }}
+                onCommit={(iso) => setNewHoliday(iso ?? '')} />
               <button className="btn" disabled={!newHoliday} onClick={async () => {
                 await settingsRepo.addHoliday(newHoliday)
                 setNewHoliday('')
@@ -274,6 +299,61 @@ export function Settings() {
           </p>
         </div>
 
+        {onDesktop && (
+          <div className="panel">
+            <p className="panel-title">
+              Data file
+              <span className="spacer" />
+              <span className={`chip${desk.status.state === 'held' || desk.status.state === 'failed' ? ' warn' : ' on'}`}>
+                {desk.status.state === 'saving' ? 'saving'
+                  : desk.status.state === 'held' ? 'writing paused'
+                    : desk.status.state === 'failed' ? 'failed' : 'on'}
+              </span>
+            </p>
+
+            <p className="muted" style={{ marginTop: 0 }}>
+              Everything is kept in a plain JSON file, rewritten a couple of seconds after anything changes, plus one
+              dated snapshot a day under <code>history/</code>. Scrumly reads it back by itself when it starts with an
+              empty database, so reinstalling the app, or moving to another machine with this folder, costs you nothing.
+            </p>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className="chip solid" style={{ fontFamily: 'ui-monospace, monospace' }}>
+                {desk.status.info?.file ?? 'locating…'}
+              </span>
+              <span className="small faint">
+                {desk.status.info?.exists
+                  ? `${fileSize(desk.status.info.bytes)}${desk.status.lastSavedAt ? ` · saved ${new Date(desk.status.lastSavedAt).toLocaleTimeString()}` : ''}`
+                  : 'nothing written yet'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
+              <button className="btn sm" onClick={() => void desk.saveNow()}>Save now</button>
+              <button className="btn sm" onClick={() => void desk.reveal()}>Open folder</button>
+              <button className="btn sm" onClick={() => void desk.chooseFolder()}>Change folder…</button>
+              <button className="btn sm" onClick={loadFromDataFile}>Load from file</button>
+            </div>
+
+            {desk.status.error && (
+              <p className="small" style={{ color: 'var(--alert)', marginBottom: 0, marginTop: 10 }}>
+                {desk.status.error}
+                {desk.status.state === 'held' && ' Nothing is being written until this is sorted, so the file on disk is still intact.'}
+              </p>
+            )}
+
+            <p className="small faint" style={{ marginTop: 10, marginBottom: 0 }}>
+              Point this at a folder inside OneDrive, Dropbox or a git repository and you get off-machine backup and
+              version history for free. If the database already has work in it when Scrumly starts, that wins and the
+              file is brought up to date behind it — use <b>Load from file</b> to go the other way deliberately.
+            </p>
+          </div>
+        )}
+
+        {/* The browser's folder mirror and the desktop data file do the same
+            job by different means. Running both would mean two writers for one
+            set of data, so only the one that applies is offered. */}
+        {!onDesktop && (
         <div className="panel">
           <p className="panel-title">
             Local folder
@@ -331,11 +411,16 @@ export function Settings() {
             </>
           )}
         </div>
+        )}
+
+        <SyncPanel />
 
         <div className="panel">
           <p className="panel-title">Backup</p>
           <p className="muted" style={{ marginTop: 0 }}>
-            Everything lives in this browser on this machine. A backup is plain JSON you can read without Scrumly, and it is the only copy that exists anywhere else.
+            {onDesktop
+              ? 'The data file above is already a copy you can read without Scrumly. An export is the same JSON, saved wherever you point it — worth one before anything drastic.'
+              : 'Everything lives in this browser on this machine. A backup is plain JSON you can read without Scrumly, and it is the only copy that exists anywhere else.'}
           </p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <button className="btn primary" onClick={doExport}>Export a backup</button>
@@ -344,7 +429,7 @@ export function Settings() {
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void doImport(f); e.target.value = '' }} />
             <span className="small faint">
               {counts.tasks} tasks · {counts.people} people · {counts.events} recorded moves
-              {cfg?.lastBackupAt ? ` · last backup ${new Date(cfg.lastBackupAt).toLocaleDateString()}` : ' · never backed up'}
+              {cfg?.lastBackupAt ? ` · last backup ${formatDate(cfg.lastBackupAt)}` : ' · never backed up'}
             </span>
           </div>
           {dump && (

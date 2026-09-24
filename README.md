@@ -1,19 +1,23 @@
 # Scrumly — the MVP, slices 1 to 5, plus multi-team
 
 A Scrum Master's working surface. Single user, local-first, no server.
-Everything lives in IndexedDB in your browser on your machine.
+Runs as a desktop app with its data in a file you own, or in a browser
+tab out of IndexedDB.
 
 ## Running it
 
     npm install
-    npm run dev          # http://localhost:5173
+    npm run app          # the desktop app, with hot reload
+    npm run dev          # the browser version, http://localhost:5173
 
+    npm run app:build    # a Windows installer and portable exe -> dist-app/
     npm run build        # normal production bundle -> dist/
     npm run build:single # one self-contained HTML file -> dist-single/index.html
     npm test             # smoke tests for the repository layer
 
 Deploy `dist/` to any static host (Cloudflare Pages), or just open
-`dist-single/index.html` from disk.
+`dist-single/index.html` from disk. Hosted, it installs on an Android
+tablet as an app that works offline — see "On a tablet or phone".
 
 ## Slice 1 — the spine
 
@@ -52,6 +56,23 @@ Added no tables and required no migration: every table went in at v1.
   arrow keys between people, a timer, and capture that lands on the
   right task while someone is still talking. Ending it shows what
   changed — nothing to write up afterwards
+- What each person said, in their own words, typed while they are still
+  talking and on screen again at the next stand-up. One box per person
+  per stand-up, saved as you type and flushed when you move on, finish,
+  or leave the screen — losing a line because somebody pressed the arrow
+  key would be the whole thing failing at the only moment it matters.
+  Yesterday's words sit directly above today's box, so reading one and
+  writing the other is a glance rather than a scroll. Somebody away on
+  Tuesday still gets Monday's read back on Wednesday: it is the last
+  thing they said, not the last stand-up that happened
+- The running order is arrangeable. Drag it, or use the arrows, on the
+  card before you start. A team with no arrangement rotates
+  alphabetically so the same person is not always last, which is what
+  every stand-up did before this existed; arrange one and it is used
+  exactly as arranged and never rotated, because rotating an order
+  somebody chose would look like the app losing it. The team keeps it
+  until it is changed. People who leave drop out, people who join go on
+  the end rather than being quietly left out of the meeting
 - Follow-ups, pulled forward from slice 5 because a stand-up you cannot
   capture into is pointless. Yours, not the team's; they wait on Today
 - Command palette on Cmd/Ctrl-K: tasks, people, and verbs. Written by
@@ -109,13 +130,18 @@ English. The diagrams are unaffected.
 - Burndown runs over working days, so a two-week sprint burns over ten
   points rather than fourteen
 
-### The first migration
+### The migrations
 
 Schema v2 adds two tables: `sprintEvents` (which task joined or left
 which sprint, and when) and `conversions` (what a note turned into).
-Adding stores only, so Dexie carries every existing row across
-untouched. A backup written under v1 still restores — there is a test
-for exactly that, because it is the one way this design can lose data. The sidebar lists
+v3 adds `standupNotes` — what each person said, one row per person per
+stand-up. v4 adds PI Planning's four tables, and v5 adds `kpis` and
+`kpiEntries` — what each person is measured on, and the readings typed in
+for the hand-tracked ones. All of them add stores only, so Dexie carries
+every existing row across untouched. A backup written under an earlier
+version still restores, and
+each version has its own test for exactly that, because it is the one
+way this design can lose data. The sidebar lists
 them with the slice that brings each one, and the Today screen says
 plainly which of its panels are still missing rather than showing
 placeholder numbers.
@@ -149,6 +175,52 @@ Columns and whiteboards stay shared across teams on purpose: the
 workflow and the diagrams are usually yours rather than any one team's.
 Say the word if a team should own its own columns.
 
+## Dates
+
+Every date Scrumly writes to the screen is `dd/mm/yyyy`, through the one
+formatter in `src/lib/dates.ts`. Screens used to format their own and
+each picked something different — `5 Mar` in the task drawer, `5 March`
+at setup, the browser's locale default in Settings, and a raw
+`2026-03-05` wherever an ISO string reached the page unformatted.
+
+Storage did not change: sprint dates and due dates are still ISO
+`YYYY-MM-DD` in the database, because that sorts and compares correctly
+as a plain string and the repo layer relies on it throughout.
+
+### Why the date fields are hand-rolled
+
+`<input type="date">` cannot be made to show `dd/mm/yyyy`. Chromium
+draws that control from the machine's regional format — not from the
+page, and not from the application. On a US-locale machine the sprint
+and due date fields rendered `09/28/2026` directly beside Scrumly's own
+text reading `28/09/2026`: the same two numbers meaning opposite things,
+which is worse than either format alone.
+
+Electron's `--lang` switch looks like the fix and is not. It moves
+`navigator.language` and `Intl`, and leaves the control exactly where it
+was. That was checked by screenshotting a real date input inside
+Electron with the switch on and off — identical, `09/28/2026` both
+times. `electron/main.cjs` carries a note so nobody re-adds it.
+
+So `src/components/DateField.tsx` owns the text. It reads and writes
+`dd/mm/yyyy`, is forgiving about what is typed into it (`1/9/26`,
+`01-09-2026` and `1.9.2026` all land on the same day) and strict about
+what it accepts — `31/02/2026` is refused and marked rather than rolled
+forward into March. The value in and out is always ISO; nothing below
+the UI sees `dd/mm/yyyy`. The native control is still there, hidden, for
+the one thing it is better at: the calendar popup behind the ▾ button,
+which draws a grid that reads the same in any locale.
+
+### Relative dates
+
+"today", "yesterday" and "3 days ago" on the boards library and the
+blockers screen stay relative. They answer "is this current" faster than
+a date does. Past a week it is a date again.
+
+Filenames are not dates in this sense and keep `YYYY-MM-DD`
+(`scrumly-2026-09-21.json`): they are sorted lexicographically by the
+pruning code, which only works biggest-unit-first.
+
 ## Column names carry meaning
 
 `ownerOf` in `src/repo/insights.ts` decides who is answerable for a task
@@ -167,7 +239,81 @@ product — days in a column, stuck lists, carry-over, burndown, cycle
 time — is read back out of `statusEvents`. If a write skips that path,
 the history is silently wrong and no error tells you.
 
-## Storage
+## The desktop app
+
+`npm run app` opens Scrumly in its own window — no address bar, no tab to
+lose, no dev server to remember to start. `npm run app:build` turns it
+into an installer and a portable `.exe` under `dist-app/`.
+
+Without a Windows machine to build on, the Build desktop app workflow
+(`.github/workflows/desktop.yml`, run from the Actions tab) does the same on
+a GitHub Windows runner and attaches both files to a release. The icon is
+`build/icon.png`.
+
+`electron-builder` is pinned to 25.x on purpose. 26.x `require()`s
+`@noble/hashes` v2, which is ESM-only, and `require()` of an ES module
+needs Node 22.12 or newer — on Node 20 packaging dies with
+`ERR_REQUIRE_ESM` after a clean bundle build, which reads like a Scrumly
+problem and is not one. Move to 26.x when this repo moves to Node 22.
+
+It is Electron, and the renderer is the same bundle the browser gets.
+Three things are different, and the second is the reason it exists:
+
+- **A fixed origin.** In a browser, IndexedDB is keyed to the origin —
+  scheme, host *and port*. `localhost:5173` and `localhost:5183` are two
+  different databases, `file://` is a third, and clearing site data
+  empties all of them. That is why a tab that worked yesterday can open
+  showing first-run setup. The packaged app serves itself from
+  `app://scrumly`, which never changes between versions or launches.
+- **A data file it owns.** See below.
+- **Links open outside.** Anything `http(s)` goes to the real browser
+  rather than navigating the Scrumly window somewhere it cannot come
+  back from.
+
+The main process is three small files. `electron/main.cjs` is the window,
+the menu and the `app://` handler; `electron/storage.cjs` is the file on
+disk; `electron/preload.cjs` is the whole of what the renderer can reach
+— five functions, no filesystem. Node stays off in the renderer and
+`contextIsolation` stays on, so nothing the app depends on, now or later,
+can touch the disk on its own.
+
+### The data file
+
+The live store is still Dexie and IndexedDB, and nothing in `src/repo`
+changed. What the desktop app adds is a plain JSON file that is the copy
+that actually matters:
+
+    %APPDATA%\Scrumly\data\
+      scrumly.json                     everything, rewritten on change
+      history/scrumly-2026-09-21.json  one per day, thirty kept
+
+Two rules, and together they are the whole of "it remembers everything":
+
+- **Starting with an empty database loads the file.** After a reinstall,
+  a profile reset, or a first run on a new machine, the data comes back
+  by itself. Nobody has to know a restore exists.
+- **Starting with work already in the database keeps it,** and brings the
+  file up to date behind it. `Load from file` in Settings is how you go
+  the other way on purpose.
+
+Writes are debounced a couple of seconds off Dexie's `storagemutated`
+event — the same signal `liveQuery` uses — and go through a temp file and
+a rename, so a crash mid-write cannot leave a half-written `scrumly.json`
+where the data used to be. Quitting flushes first, so the last few
+seconds of a stand-up are never the part that goes missing.
+
+The case that needed the most care is a data file that exists but cannot
+be parsed. Starting fresh and then autosaving would turn a one-line
+syntax error into an empty file. Instead the app holds every write,
+says so in Settings and in a toast, and leaves the file on disk exactly
+as it found it.
+
+**Change folder…** in Settings moves it anywhere — inside OneDrive,
+Dropbox or a git repository — and unlike the browser's folder mirror
+there is no permission to re-grant, ever. The layout written is identical
+to the one below, so the two can share a folder.
+
+## Storage in the browser
 
 The live database is IndexedDB, in one browser profile on one machine.
 That has not changed, and nothing about how the app reads or writes goes
@@ -175,6 +321,9 @@ through anything else. What has changed is that it no longer has to be
 the only copy.
 
 ### The local folder
+
+Only in the browser: the desktop app shows its **Data file** panel here
+instead, because two writers for one set of data is how they diverge.
 
 Settings has a **Local folder** panel. Point it at a directory once and
 Scrumly keeps a plain JSON copy of everything there, rewritten a couple
@@ -238,6 +387,63 @@ it, so it lowers the risk rather than removing it — which is exactly why
 the folder exists.
 
 Export and restore by hand still work and still produce the same JSON.
+
+## On a tablet or phone
+
+The hosted build installs as an app. Every push to `main` is built and
+published to GitHub Pages by `.github/workflows/pages.yml`, at
+https://savevskidarko.github.io/scrumly/ (any other HTTPS host serving
+`dist/` works the same). Open it in Chrome on Android, and use **⋮ → Install app** (or Add to Home
+screen). It opens full-screen from its own icon and works with no
+connection: every file in the build is cached the first time it loads.
+
+- The data is the browser's, on that device, exactly as in "Storage in the
+  browser" above. Installing does not sync anything; moving data between
+  the tablet and a computer is a backup exported on one and restored on
+  the other
+- A new deploy downloads in the background and takes over the next time
+  the app is opened from closed, never under an open window
+- On a touch screen a card is picked up by pressing and holding it. A
+  finger that moves straight away scrolls the board instead
+- `npm run dev` and the desktop app never register the service worker, so
+  nothing gets cached over hot reload. The single-file build has no
+  manifest or worker and cannot be installed
+
+The worker is `pwa/sw.js`; `vite.config.ts` fills in its file list and
+version on every `npm run build`.
+
+## Sync across devices
+
+Optional, and off until it is pointed at a Supabase project. Signed in with
+the same account, the laptop, the tablet and the phone share one set of
+data. IndexedDB (and the desktop app's file) stays the live store, so every
+device still works with no connection; `src/sync/` just moves rows.
+
+- Every write is noticed by Dexie middleware (`src/sync/tracker.ts`), so no
+  repo function has to remember to tell sync. The row is sent as it is a
+  moment later; a row that is gone is sent as deleted
+- Other devices hear about it over Supabase realtime, and pull anything
+  they missed when they come back to the foreground or online
+- Per row, the later save wins. A row with an unsent change on this device
+  is never overwritten by an incoming one
+- The first sign-in on a device: an empty account takes this device's data,
+  an empty device takes the account's, and if both have some you choose
+- Restoring a backup while signed in replaces the data on every device
+
+Setting it up, once:
+
+1. Create a free project at https://supabase.com
+2. SQL Editor → New query → paste `supabase/schema.sql` → Run
+3. Authentication → Users → Add user → Create new user, with your email and
+   a password, and tick Auto Confirm User
+4. Authentication → Sign In / Providers → turn off Allow new users to sign
+   up, so nobody else can make an account on your project
+5. Project Settings → API: put the Project URL and the anon (publishable)
+   key into `src/sync/config.ts`, or set `VITE_SUPABASE_URL` and
+   `VITE_SUPABASE_ANON_KEY` when building. Both are safe to publish; row
+   level security means a signed-in user only ever reaches their own rows
+
+Then Settings → Sync across devices → sign in, on each device.
 
 ## About the name
 

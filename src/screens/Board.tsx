@@ -1,5 +1,5 @@
 import {
-  DndContext, DragOverlay, PointerSensor, useDroppable, useSensor, useSensors,
+  DndContext, DragOverlay, MouseSensor, TouchSensor, useDroppable, useSensor, useSensors,
   type DragEndEvent, type DragStartEvent,
 } from '@dnd-kit/core'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -82,7 +82,13 @@ function Cell({
 export function Board({ teamId }: { teamId: string }) {
   const [dragging, setDragging] = useState<Task | null>(null)
   const route = useRoute()
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+  // Mouse and touch separately, because a whole card is the handle. A finger
+  // on a card is usually the start of a scroll, so touch waits for a press and
+  // hold, and a finger that moves first scrolls the board as it always did.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } }),
+  )
 
   const bucket = route.params.get('filter') as Bucket | null
   const personId = route.params.get('person')
