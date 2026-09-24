@@ -36,6 +36,13 @@ drop trigger if exists scrumly_rows_touch on public.scrumly_rows;
 create trigger scrumly_rows_touch before insert or update on public.scrumly_rows
   for each row execute function public.scrumly_rows_touch();
 
+-- Newer projects no longer grant table access to the API roles by default.
+-- Signed-in users get it here; anonymous visitors get nothing at all. The
+-- sequence grant is for the trigger above, which runs as the signed-in user.
+revoke all on public.scrumly_rows from anon;
+grant select, insert, update, delete on public.scrumly_rows to authenticated;
+grant usage, select on sequence public.scrumly_rows_seq to authenticated;
+
 alter table public.scrumly_rows enable row level security;
 
 drop policy if exists "own rows" on public.scrumly_rows;
