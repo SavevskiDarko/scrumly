@@ -94,7 +94,8 @@ export function Today({ teamId }: { teamId: string }) {
 
   const today = formatDateWithWeekday(new Date())
   const openTask = (id: string) => setParam('task', id)
-  const showBucket = (b: Bucket) => go('board', { filter: b })
+  // Everything on this screen counts every task, so the board it opens has to as well.
+  const showBucket = (b: Bucket) => go('board', { filter: b, sprint: 'all' })
   const nothingWrong = blocked.length + stuck.length + overdue.length + unowned.length === 0
 
   const attnRow = (t: Task, note: string, chip?: string, hot?: boolean) => (
@@ -225,7 +226,7 @@ export function Today({ teamId }: { teamId: string }) {
               {load.length === 0 && <p className="muted small" style={{ margin: 0 }}>Nobody on this team yet.</p>}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
                 {load.map(({ person, active, blocked: nb }) => (
-                  <button key={person.id} className="load-row" onClick={() => go('board', { person: person.id })}>
+                  <button key={person.id} className="load-row" onClick={() => go('board', { person: person.id, sprint: 'all' })}>
                     <Avatar person={person} size={20} />
                     <span style={{ width: 62, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis' }}>{person.name.split(' ')[0]}</span>
                     <span className="bar" style={{ flex: 1 }}>

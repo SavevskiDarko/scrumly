@@ -3,8 +3,8 @@ import type { Person } from '../db/types'
 import { parseQuickAdd, tasks } from '../repo'
 
 export function QuickAdd({
-  teamId, statusId, people, onDone,
-}: { teamId: string; statusId: string; people: Person[]; onDone?: () => void }) {
+  teamId, statusId, people, sprintId = null, onDone,
+}: { teamId: string; statusId: string; people: Person[]; sprintId?: string | null; onDone?: () => void }) {
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState('')
 
@@ -14,7 +14,7 @@ export function QuickAdd({
     const match = parsed.assigneeName
       ? people.find((p) => p.name.toLowerCase().startsWith(parsed.assigneeName!.toLowerCase()))
       : undefined
-    await tasks.create({
+    const task = await tasks.create({
       teamId,
       statusId,
       title: parsed.title,
@@ -23,6 +23,8 @@ export function QuickAdd({
       size: parsed.size,
       tags: parsed.tags,
     })
+    // Through setSprint rather than create, so the join is logged like any other.
+    if (sprintId) await tasks.setSprint(task.id, sprintId)
     setValue('')
     if (!keepOpen) { setOpen(false); onDone?.() }
   }

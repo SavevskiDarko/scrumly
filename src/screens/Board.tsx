@@ -27,15 +27,17 @@ const BUCKET_LABEL: Record<Bucket, string> = {
 const byOrder = (a: Task, b: Task) => a.orderInColumn - b.orderInColumn
 
 function StatusColumn({
-  status, items, total, people, teamId, ix, filtered, depOf, onOpen,
+  status, items, total, inColumn, people, teamId, sprintId, ix, filtered, canAdd, depOf, onOpen,
 }: {
-  status: Status; items: Task[]; total: number; people: Person[]; teamId: string
-  ix: BoardIndex; filtered: boolean; depOf: (t: Task) => DepInfo | null; onOpen: (id: string) => void
+  status: Status; items: Task[]; total: number; inColumn: number; people: Person[]; teamId: string
+  sprintId: string | null; ix: BoardIndex; filtered: boolean; canAdd: boolean
+  depOf: (t: Task) => DepInfo | null; onOpen: (id: string) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `col:${status.id}` })
-  // Measured against everything in the column, not what a filter left visible:
-  // a WIP limit that relaxes when you filter is worse than no WIP limit.
-  const overLimit = status.wipLimit != null && total > status.wipLimit
+  // Measured against everything in the column, not what a filter left visible
+  // or which sprint is showing: a WIP limit that relaxes when you filter is
+  // worse than no WIP limit.
+  const overLimit = status.wipLimit != null && inColumn > status.wipLimit
   return (
     <div ref={setNodeRef} className={`column${isOver ? ' over' : ''}`}>
       <div className="col-head">
@@ -54,7 +56,7 @@ function StatusColumn({
         ))}
         {items.length === 0 && !filtered && <div className="small faint" style={{ padding: '6px 4px' }}>Nothing here</div>}
       </div>
-      {!filtered && <QuickAdd teamId={teamId} statusId={status.id} people={people} />}
+      {canAdd && <QuickAdd teamId={teamId} statusId={status.id} people={people} sprintId={sprintId} />}
     </div>
   )
 }
@@ -98,20 +100,31 @@ export function Board({ teamId }: { teamId: string }) {
   const people = useTeamPeople(teamId)
   const all = useLiveQuery(() => db.tasks.where('teamId').equals(teamId).toArray(), [teamId], [])
   const openBlockers = useLiveQuery(() => blockerRepo.listOpen(), [], [])
-  const sprintList = useLiveQuery(() => sprintRepo.listForTeam(teamId), [teamId], [])
+  // No default here: until the sprints are read there is no telling which one
+  // the board opens on, and guessing "all tasks" flashes the wrong board.
+  const sprintRows = useLiveQuery(() => sprintRepo.listForTeam(teamId), [teamId])
+  const sprintList = sprintRows ?? []
 
   const ix = buildIndex(statuses, people, openBlockers)
   const depOf = useDependencies(all, ix.doneIds)
-  const sprintFilter = route.params.get('sprint')
 
-  let visible = all
-  if (sprintFilter) visible = visible.filter((t) => t.sprintId === sprintFilter)
+  // The board opens on the running sprint. "all" is the explicit way out to
+  // every task, and the only view there is when no sprint is running.
+  const sprintParam = route.params.get('sprint')
+  const activeSprint = sprintList.find((s) => s.state === 'active') ?? null
+  const sprintFilter = sprintParam === 'all' ? null : sprintParam ?? activeSprint?.id ?? null
+  const shownSprint = sprintFilter ? sprintList.find((s) => s.id === sprintFilter) ?? null : null
+
+  const scoped = !sprintRows ? [] : sprintFilter ? all.filter((t) => t.sprintId === sprintFilter) : all
+  let visible = scoped
   if (personId) visible = visible.filter((t) => t.assigneeId === personId || t.reviewerId === personId || t.testerId === personId)
   if (bucket && bucket in BUCKET_LABEL) visible = visible.filter((t) => bucketOf(t, ix)[bucket])
-  // The sprint filter counts too. Leaving it out kept quick-add on screen while
-  // filtered, so a task added there was created with no sprint and vanished as
-  // soon as it was saved.
-  const filtered = Boolean(personId || bucket || sprintFilter)
+  const filtered = Boolean(personId || bucket)
+  // Quick-add puts the task in the sprint on screen, or it would vanish from
+  // this board as soon as it was saved. Nothing new belongs in a closed sprint.
+  const canAdd = !filtered && shownSprint?.state !== 'closed'
+  // Only a sprint someone picked is a filter to clear; the running one is just the board.
+  const showFilterBar = filtered || Boolean(sprintParam && sprintParam !== 'all')
 
   function onStart(e: DragStartEvent) {
     setDragging(all.find((t) => t.id === String(e.active.id).slice(5)) ?? null)
@@ -165,9 +178,9 @@ export function Board({ teamId }: { teamId: string }) {
         </div>
         <span className="spacer" />
         {sprintList.length > 0 && (
-          <select className="select" style={{ width: 132 }} value={sprintFilter ?? ''}
-            onChange={(e) => setParam('sprint', e.target.value || null)}>
-            <option value="">All tasks</option>
+          <select className="select" style={{ width: 132 }} value={sprintFilter ?? 'all'}
+            onChange={(e) => setParam('sprint', e.target.value === (activeSprint?.id ?? 'all') ? null : e.target.value)}>
+            <option value="all">All tasks</option>
             {sprintList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         )}
@@ -178,12 +191,12 @@ export function Board({ teamId }: { teamId: string }) {
         <span className="small faint">{visible.length} of {all.length}</span>
       </div>
 
-      {filtered && (
+      {showFilterBar && (
         <div className="filter-bar">
           <span>
             Showing tasks{bucket ? ` ${BUCKET_LABEL[bucket]}` : ''}
             {personId ? ` for ${ix.byPerson.get(personId)?.name ?? 'someone'}` : ''}
-            {sprintFilter ? ` in ${sprintList.find((s) => s.id === sprintFilter)?.name ?? 'a sprint'}` : ''}
+            {sprintFilter ? ` in ${shownSprint?.name ?? 'a sprint'}` : ''}
           </span>
           {visible.length === 0 && <span className="faint">— none right now</span>}
           <span className="spacer" />
@@ -233,9 +246,11 @@ export function Board({ teamId }: { teamId: string }) {
             ) : (
               <div className="board">
                 {statuses.map((s) => (
-                  <StatusColumn key={s.id} status={s} teamId={teamId} people={people} ix={ix} filtered={filtered} depOf={depOf}
+                  <StatusColumn key={s.id} status={s} teamId={teamId} people={people} ix={ix} depOf={depOf}
+                    filtered={filtered} canAdd={canAdd} sprintId={sprintFilter}
                     items={visible.filter((t) => t.statusId === s.id).sort(byOrder)}
-                    total={all.filter((t) => t.statusId === s.id).length}
+                    total={scoped.filter((t) => t.statusId === s.id).length}
+                    inColumn={all.filter((t) => t.statusId === s.id).length}
                     onOpen={(id) => setParam('task', id)} />
                 ))}
               </div>
