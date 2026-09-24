@@ -242,6 +242,11 @@ the history is silently wrong and no error tells you.
 lose, no dev server to remember to start. `npm run app:build` turns it
 into an installer and a portable `.exe` under `dist-app/`.
 
+Without a Windows machine to build on, the Build desktop app workflow
+(`.github/workflows/desktop.yml`, run from the Actions tab) does the same on
+a GitHub Windows runner and attaches both files to a release. The icon is
+`build/icon.png`.
+
 `electron-builder` is pinned to 25.x on purpose. 26.x `require()`s
 `@noble/hashes` v2, which is ESM-only, and `require()` of an ES module
 needs Node 22.12 or newer — on Node 20 packaging dies with
