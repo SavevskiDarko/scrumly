@@ -22,6 +22,10 @@ export function TaskDrawer({ taskId }: { taskId: ID }) {
   const history = useLiveQuery(() => taskRepo.history(taskId), [taskId], [])
   const diagrams = useLiveQuery(() => boardRepo.forEntity('task', taskId), [taskId], [])
   const sprintList = useLiveQuery(async () => (task ? await sprintRepo.listForTeam(task.teamId) : []), [task?.teamId], [])
+  // Where "Open in Jira" points. Gone if the team stopped following its board.
+  const jiraSite = useLiveQuery(
+    async () => (task?.jira ? (await db.teams.get(task.teamId))?.jira?.site ?? null : null), [task?.teamId, task?.jira?.key], null,
+  )
   const [title, setTitle] = useState('')
   const [desc, setDesc] = useState('')
 
@@ -92,6 +96,11 @@ export function TaskDrawer({ taskId }: { taskId: ID }) {
           <span className="chip solid">{statusById.get(task.statusId)?.name ?? '—'}</span>
           <span className="small faint">{daysInStatus(task)}d here</span>
           <span className="spacer" />
+          {task.jira && jiraSite && (
+            <a className="btn ghost sm" href={`${jiraSite}/browse/${encodeURIComponent(task.jira.key)}`} target="_blank" rel="noreferrer">
+              Open in Jira
+            </a>
+          )}
           <button className="btn ghost sm" onClick={close}>Close</button>
         </div>
 
@@ -103,6 +112,12 @@ export function TaskDrawer({ taskId }: { taskId: ID }) {
             onChange={(e) => setTitle(e.target.value)}
             onBlur={() => title.trim() && title !== task.title && taskRepo.update(task.id, { title: title.trim() })}
           />
+          {task.jira && (
+            <p className="small faint" style={{ margin: '-8px 0 0' }}>
+              From Jira. Its title, status, sprint, assignee, size and dates come from there and are replaced on the
+              next pull; reviewer, tester, blockers and dependencies are kept.
+            </p>
+          )}
 
           <BlockedPanel taskId={task.id} teamId={task.teamId} />
 

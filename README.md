@@ -445,6 +445,44 @@ Setting it up, once:
 
 Then Settings → Sync across devices → sign in, on each device.
 
+## Jira
+
+A team can follow a Jira board: its sprints and issues come into Scrumly on
+their own, one way. Works with Jira Cloud (email + API token) and with
+Server or Data Center (a personal access token). Settings → Jira, in the
+desktop app.
+
+- **Desktop only.** Jira's API does not answer a web page from another
+  origin, so the browser build cannot call it. The desktop app's main process
+  can (`electron/jira.cjs`), and what it imports reaches every other device
+  through sync
+- **The token never enters the database.** It is encrypted with the OS
+  (DPAPI on Windows) into the app's userData folder — not the data folder,
+  which can be moved into a synced drive or this repo. The renderer hands it
+  over once and can only ever ask for read-only GETs of `/rest/agile/1.0/`
+  and `/rest/api/2/`; redirects are refused, so a login page cannot collect
+  the Authorization header
+- **Jira owns what it knows.** Each pull overwrites an issue's title, status,
+  sprint, assignee, points (from the board's own estimation field), priority,
+  due date and labels. Reviewer, tester, blockers and dependencies have no
+  Jira field, are Scrumly's own, and survive every pull
+- **The history comes too.** Burndown, velocity, cycle time and board KPIs
+  are replayed from `statusEvents` and `sprintEvents`, so each issue's
+  changelog is replayed into them. Imported sprints chart like native ones
+- **Statuses land in columns** by name, then by the board column's name,
+  then by Jira's category (to do / in progress / done). Any of them can be
+  set by hand in Settings
+- **Assignees** are matched to people by Jira id, then by name; anyone new
+  joins the team
+- **Pulls are cheap to repeat.** Rows get ids derived from Jira's, so two
+  desktops pulling the same board make the same rows, and the writer only
+  touches rows that differ — an unchanged board syncs nothing. It pulls on
+  start-up and every 15 minutes while the app is open, or on Pull now
+- Scope: active and future sprints, the last eight closed ones (velocity
+  reads six), and optionally the backlog. An issue that leaves a pulled
+  sprint is looked up on its own; if Jira no longer has it, neither does
+  Scrumly
+
 ## About the name
 
 The app was called Cadence during design. Two things kept the old name

@@ -549,3 +549,13 @@ button,input,select,textarea{font:inherit;color:inherit}
 .metric-hist-row .when{width:78px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .metric-hist-row .v{width:72px;flex:none;font-weight:600;font-variant-numeric:tabular-nums}
 .metric-hist-row .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+﻿
+/* ---------- Jira ---------- */
+.jira-boards{display:flex;flex-direction:column;gap:5px;max-width:520px;max-height:260px;overflow-y:auto}
+.jira-board{display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface-2)}
+.jira-check{display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer}
+.jira-map{display:flex;flex-direction:column;gap:5px;max-width:620px}
+.jira-map-row{display:flex;align-items:center;gap:8px}
+.jira-map-col{width:110px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jira-map-status{width:150px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jira-map-row .select{flex:1;min-width:0;padding:4px 7px;font-size:12px}

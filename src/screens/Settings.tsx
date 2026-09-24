@@ -5,6 +5,7 @@ import { db } from '../db/schema'
 import { useAutoSaveApi } from '../components/AutoSaveProvider'
 import { useDesktop } from '../desktop/DesktopProvider'
 import { SyncPanel } from '../sync/SyncPanel'
+import { JiraPanel } from '../jira/JiraPanel'
 import { fileSize, isDesktop } from '../desktop/bridge'
 import { DateField } from '../components/DateField'
 import { formatDate, formatDateWithWeekday } from '../lib/dates'
@@ -414,6 +415,8 @@ export function Settings() {
         )}
 
         <SyncPanel />
+
+        <JiraPanel />
 
         <div className="panel">
           <p className="panel-title">Backup</p>

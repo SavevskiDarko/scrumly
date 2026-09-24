@@ -29,6 +29,27 @@ export interface Team {
    * is what every stand-up did before this existed.
    */
   standupOrder?: ID[]
+  /** Set when this team mirrors a Jira board. Absent for every team that does not. */
+  jira?: JiraLink
+}
+
+/**
+ * Which Jira board a team mirrors, and how. No credentials in here, ever: this
+ * row is synced and backed up, and the token lives only in the desktop app's
+ * encrypted store.
+ */
+export interface JiraLink {
+  /** The Jira base URL the board belongs to. A pull refuses to run against any other site. */
+  site: string
+  boardId: number
+  boardName: string
+  /** Jira status id -> Scrumly column id, for statuses mapped by hand. The rest are matched by name or category. */
+  statusMap: Record<string, ID>
+  /** Also bring in the issues sitting in the board's backlog, not just those in sprints. */
+  includeBacklog: boolean
+  /** Pull on start-up and every few minutes while the desktop app is open. */
+  auto: boolean
+  lastPull: { at: number; ok: boolean; message: string } | null
 }
 
 export interface Person {
@@ -42,6 +63,8 @@ export interface Person {
   active: boolean
   teamIds: ID[]
   createdAt: number
+  /** Jira's id for this person (accountId on Cloud, username on Server), once an import has matched them. */
+  jiraId?: string
 }
 
 export interface Status {
@@ -63,6 +86,8 @@ export interface Sprint {
   endDate: string
   state: 'planned' | 'active' | 'closed'
   closedAt: number | null
+  /** The Jira sprint this mirrors. Jira owns it: a pull overwrites anything changed here. */
+  jira?: { id: number }
 }
 
 export interface Task {
@@ -86,9 +111,19 @@ export interface Task {
   updatedAt: number
   statusChangedAt: number
   closedAt: number | null
+  /**
+   * The Jira issue this mirrors. Jira owns its title, status, sprint, assignee,
+   * size and dates; reviewer, tester, blockers and dependencies are Scrumly's
+   * own and survive every pull.
+   */
+  jira?: { id: string; key: string }
 }
 
-/** Append-only. Never edited; deleted only with its task. */
+/**
+ * Append-only. Never edited; deleted only with its task. The one exception is
+ * a task imported from Jira, whose history is a replay of Jira's changelog and
+ * is rebuilt from it on every pull.
+ */
 export interface StatusEvent {
   id: ID
   taskId: ID

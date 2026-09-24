@@ -28,6 +28,7 @@ app.setName('Scrumly')
 // src/components/DateField.tsx is the actual fix.
 
 const storage = require('./storage.cjs')
+const jira = require('./jira.cjs')
 
 const DIST = path.join(__dirname, '..', 'dist')
 const DEV_URL = process.env.SCRUMLY_DEV_URL || null
@@ -171,6 +172,13 @@ function registerIpc() {
   ipcMain.handle('scrumly:load', () => storage.read())
   ipcMain.handle('scrumly:save', (_e, snapshot) => storage.write(snapshot))
   ipcMain.handle('scrumly:reveal', async () => { void shell.openPath(await storage.dataDir()) })
+
+  // The token goes in through connect and never comes back out: status reports
+  // who is connected, and request returns Jira's data, not the credentials.
+  ipcMain.handle('scrumly:jira-status', () => jira.status())
+  ipcMain.handle('scrumly:jira-connect', (_e, input) => jira.connect(input))
+  ipcMain.handle('scrumly:jira-disconnect', () => jira.disconnect())
+  ipcMain.handle('scrumly:jira-get', (_e, apiPath) => jira.request(apiPath))
 
   ipcMain.handle('scrumly:choose-dir', async () => {
     const options = {

@@ -8,6 +8,7 @@ import { TaskDrawer } from './components/TaskDrawer'
 import { ToastHost, useToast } from './components/Toast'
 import { db } from './db/schema'
 import { useRoute } from './hooks/useRoute'
+import { useJiraAutoPull } from './jira/useJiraAutoPull'
 import { CommandPalette } from './components/CommandPalette'
 import { PasteTasks } from './components/PasteTasks'
 import { PersonDrawer } from './components/PersonDrawer'
@@ -61,6 +62,7 @@ function Inner() {
   const teams = useLiveQuery(() => db.teams.orderBy('name').toArray(), [])
 
   useRestoredNotice()
+  useJiraAutoPull()
 
   useEffect(() => {
     settingsRepo.ensure().then(() => setReady(true))

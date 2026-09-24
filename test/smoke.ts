@@ -11,6 +11,10 @@ import {
 import { flowSkeleton, looksLikeFlow, parseFlow } from '../src/canvas/quickFlow'
 import { fileStore, historyName, prunable } from '../src/repo/fileStore'
 import { formatDate, parseDateInput } from '../src/lib/dates'
+import { createRequire } from 'node:module'
+import type { JiraBridge } from '../src/desktop/bridge'
+import { jiraLinks, jiraTime, plainText, priorityFrom, type JiraIssue } from '../src/repo/jira'
+import { pullTeam } from '../src/jira/pull'
 
 let failures = 0
 function check(label: string, cond: boolean, extra = '') {
@@ -1126,6 +1130,225 @@ async function run() {
   check('other units get a space', formatKpiValue(6, 'h') === '6 h' && formatKpiValue(3, '') === '3')
   check('and one of something is singular', formatKpiValue(1, 'tasks') === '1 task'
     && formatKpiValue(-1, 'days') === '-1 day' && formatKpiValue(2, 'tasks') === '2 tasks' && formatKpiValue(1, 'h') === '1 h')
+
+  // ---------- Jira import ----------
+  console.log('\n  -- jira --')
+
+  check('Jira offsets are read', jiraTime('2026-03-02T09:00:00.000+0100') === Date.parse('2026-03-02T08:00:00.000Z'))
+  check('Jira priorities land on ours', priorityFrom('Highest') === 'urgent' && priorityFrom('Major') === 'high'
+    && priorityFrom('Medium') === 'normal' && priorityFrom('Trivial') === 'low')
+  check('a Cloud description tree becomes text', plainText({
+    type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Pay' }, { type: 'text', text: ' now' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Second' }] }],
+  }) === 'Pay now\nSecond')
+
+  const { normaliseSite } = createRequire(import.meta.url)('../electron/jira.cjs') as { normaliseSite(s: string): string }
+  check('a bare Cloud host becomes an https address', normaliseSite('acme.atlassian.net') === 'https://acme.atlassian.net')
+  check('a Server context path is kept, trailing slash dropped',
+    normaliseSite('https://jira.acme.com/jira/') === 'https://jira.acme.com/jira')
+  let plainHttp = false
+  try { normaliseSite('http://jira.acme.com') } catch { plainHttp = true }
+  check('plain http is refused, so the token never crosses the network in the clear', plainHttp)
+  check('except on this machine', normaliseSite('http://localhost:8080') === 'http://localhost:8080')
+
+  // A small Jira: one closed sprint, one running, one planned, and a sprint
+  // from someone else's board that shows up on this one.
+  const SITE = 'https://acme.atlassian.net'
+  const jTeam = await teams.create({ name: 'Jira Team' })
+  const anaJ = await people.create({ name: 'Ana Jira', teamIds: [jTeam.id] })
+  const jCols = await statuses.list()
+  const colNamed = (n: string) => jCols.find((c) => c.name === n)!
+  const t = (s: string) => `2026-03-${s}.000+0100`
+  const change = (id: string, at: string, field: string, from: string | null, to: string | null) =>
+    ({ id, created: t(at), items: [{ field, fieldId: field.toLowerCase(), from, to }] })
+
+  const issueA: JiraIssue = {
+    id: '1001', key: 'PAY-1',
+    fields: {
+      summary: 'Charge the card', status: { id: '5', name: 'Done', statusCategory: { key: 'done' } },
+      assignee: { accountId: 'acc-ana', displayName: 'Ana Jira' }, priority: { name: 'High' }, labels: ['api'],
+      created: t('01T10:00:00'), updated: t('06T10:00:00'), customfield_10016: 5,
+      sprint: null, closedSprints: [{ id: 101 }],
+    },
+    changelog: {
+      total: 4, histories: [
+        change('11', '02T09:30:00', 'Sprint', '', '101'),
+        change('12', '03T10:00:00', 'status', '1', '3'),
+        change('13', '05T10:00:00', 'status', '3', '10'),
+        change('14', '06T10:00:00', 'status', '10', '5'),
+      ],
+    },
+  }
+  const issueB: JiraIssue = {
+    id: '1002', key: 'PAY-2',
+    fields: {
+      summary: 'Refund flow', status: { id: '3', name: 'In Progress', statusCategory: { key: 'indeterminate' } },
+      assignee: { accountId: 'acc-ben', displayName: 'Ben Builder' }, priority: { name: 'Medium' },
+      created: t('02T08:00:00'), updated: t('13T18:00:00'), customfield_10016: 3,
+      sprint: { id: 102 }, closedSprints: [{ id: 101 }],
+    },
+    // Created straight into sprint 1, carried into sprint 2 when it closed.
+    changelog: { total: 2, histories: [change('21', '04T10:00:00', 'status', '1', '3'), change('22', '13T18:00:00', 'Sprint', '101', '101, 102')] },
+  }
+  const issueC: JiraIssue = {
+    id: '1003', key: 'PAY-3',
+    fields: {
+      summary: 'Receipt screen', status: { id: '1', name: 'To Do', statusCategory: { key: 'new' } },
+      assignee: null, labels: ['ui'], created: t('20T09:00:00'), updated: t('20T09:00:00'), sprint: { id: 103 },
+      description: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Show the total' }] }] },
+    },
+    changelog: { total: 0, histories: [] },
+  }
+  const issueD: JiraIssue = {
+    id: '1004', key: 'PAY-4',
+    fields: {
+      summary: 'Spike that gets deleted', status: { id: '1', name: 'To Do', statusCategory: { key: 'new' } },
+      created: t('16T09:00:00'), updated: t('16T09:00:00'), sprint: { id: 102 },
+    },
+    changelog: { total: 0, histories: [] },
+  }
+
+  const jira = {
+    sprint102: [issueB, issueD] as JiraIssue[],
+    deleted: new Set<string>(),
+    requests: [] as string[],
+  }
+  const fakeJira = (site = SITE): JiraBridge => ({
+    status: async () => ({ connected: true, site, user: 'Tester', cloud: true, encryption: true }),
+    connect: async () => ({ ok: false as const, message: 'not in tests' }),
+    disconnect: async () => {},
+    get: async <T,>(path: string) => {
+      jira.requests.push(path)
+      const [p, q = ''] = path.split('?')
+      const params = new URLSearchParams(q)
+      const startAt = Number(params.get('startAt') ?? 0)
+      const ok = (data: unknown) => ({ ok: true as const, status: 200, data: data as T })
+      // One issue per page for the running sprint, so paging is exercised.
+      const issuesPage = (all: JiraIssue[], size = Number(params.get('maxResults') ?? 50)) =>
+        ok({ startAt, total: all.length, issues: all.slice(startAt, startAt + size) })
+      if (p === '/rest/agile/1.0/board/7/configuration') {
+        return ok({
+          columnConfig: { columns: [{ name: 'To Do', statuses: [{ id: '1' }] }, { name: 'In Progress', statuses: [{ id: '3' }] },
+            { name: 'In Review', statuses: [{ id: '10' }] }, { name: 'Done', statuses: [{ id: '5' }] }] },
+          estimation: { type: 'field', field: { fieldId: 'customfield_10016', displayName: 'Story point estimate' } },
+        })
+      }
+      if (p === '/rest/api/2/status') {
+        return ok([
+          { id: '1', name: 'To Do', statusCategory: { key: 'new' } },
+          { id: '3', name: 'In Progress', statusCategory: { key: 'indeterminate' } },
+          { id: '10', name: 'In Review', statusCategory: { key: 'indeterminate' } },
+          { id: '5', name: 'Done', statusCategory: { key: 'done' } },
+        ])
+      }
+      if (p === '/rest/agile/1.0/board/7/sprint') {
+        return ok({
+          isLast: true, values: [
+            { id: 101, state: 'closed', name: 'JS 1', startDate: t('02T09:00:00'), endDate: t('13T17:00:00'), completeDate: t('13T18:00:00'), originBoardId: 7 },
+            { id: 102, state: 'active', name: 'JS 2', startDate: t('16T09:00:00'), endDate: t('27T17:00:00'), originBoardId: 7 },
+            { id: 103, state: 'future', name: 'JS 3', originBoardId: 7 },
+            { id: 999, state: 'active', name: 'Their sprint', startDate: t('16T09:00:00'), endDate: t('27T17:00:00'), originBoardId: 8 },
+          ],
+        })
+      }
+      if (p === '/rest/agile/1.0/sprint/101/issue') return issuesPage([issueA, issueB])
+      if (p === '/rest/agile/1.0/sprint/102/issue') return issuesPage(jira.sprint102, 1)
+      if (p === '/rest/agile/1.0/sprint/103/issue') return issuesPage([issueC])
+      const single = p.match(/^\/rest\/api\/2\/issue\/(\d+)$/)
+      if (single && !jira.deleted.has(single[1])) {
+        const found = [issueA, issueB, issueC, issueD].find((i) => i.id === single[1])
+        if (found) return ok(found)
+      }
+      return { ok: false as const, status: 404, message: 'Jira has no such thing (404)' }
+    },
+  })
+
+  check('a team with no link refuses to pull', !(await pullTeam(jTeam.id, fakeJira())).ok)
+  await jiraLinks.link(jTeam.id, { site: SITE, boardId: 7, boardName: 'Payments board' })
+  const wrongSite = await pullTeam(jTeam.id, fakeJira('https://other.atlassian.net'))
+  check('a pull refuses to run against a different Jira site', !wrongSite.ok && /other\.atlassian\.net/.test(wrongSite.message), wrongSite.message)
+
+  const first = await pullTeam(jTeam.id, fakeJira())
+  check('the first pull works', first.ok, first.message)
+  check('it asks for the board\'s own points field',
+    jira.requests.some((r) => r.startsWith('/rest/agile/1.0/sprint/101/issue') && r.includes('customfield_10016')))
+  check('and pages through a long sprint', jira.requests.filter((r) => r.startsWith('/rest/agile/1.0/sprint/102/issue')).length === 2)
+
+  const jSprints = (await sprints.listForTeam(jTeam.id))
+  const js = (n: string) => jSprints.find((s) => s.name === n)!
+  check("another board's sprint is not this team's", jSprints.length === 3 && !jSprints.some((s) => s.name === 'Their sprint'),
+    jSprints.map((s) => s.name).join())
+  check('sprint states come across', js('JS 1').state === 'closed' && js('JS 2').state === 'active' && js('JS 3').state === 'planned')
+  check('dates are local days', js('JS 1').startDate === '2026-03-02' && js('JS 1').endDate === '2026-03-13')
+  check('an undated future sprint follows the one before', js('JS 3').startDate === '2026-03-28', js('JS 3').startDate)
+
+  const jTasks = await tasks.listForTeam(jTeam.id)
+  const jt = (key: string) => jTasks.find((x) => x.key === key)!
+  check('issues keep their Jira keys', ['PAY-1', 'PAY-2', 'PAY-3', 'PAY-4'].every((k) => jt(k)), jTasks.map((x) => x.key).join())
+  check('status maps by name', jt('PAY-1').statusId === colNamed('Done').id && jt('PAY-3').statusId === colNamed('To do').id)
+  check('size comes from the board\'s estimation field', jt('PAY-1').size === 5 && jt('PAY-3').size === null)
+  check('priority and labels come across', jt('PAY-1').priority === 'high' && jt('PAY-1').tags.join() === 'api')
+  check('a description tree becomes text', jt('PAY-3').description === 'Show the total')
+  check('finished work stays in the sprint it finished in', jt('PAY-1').sprintId === js('JS 1').id && jt('PAY-1').closedAt !== null)
+  check('carried work sits in the running sprint', jt('PAY-2').sprintId === js('JS 2').id)
+  check('planned work sits in the planned sprint', jt('PAY-3').sprintId === js('JS 3').id)
+
+  const anaAfter = (await people.get(anaJ.id))!
+  check('an assignee is matched to someone with the same name', jt('PAY-1').assigneeId === anaJ.id && anaAfter.jiraId === 'acc-ana')
+  const ben = (await db.people.toArray()).find((p) => p.name === 'Ben Builder')
+  check('an unknown assignee joins the team', !!ben && ben.teamIds.includes(jTeam.id) && jt('PAY-2').assigneeId === ben.id)
+
+  const aHistory = await tasks.history(jt('PAY-1').id)
+  check('two Jira statuses in one column are one place, not a move', aHistory.length === 3,
+    aHistory.map((e) => e.toStatusId === colNamed('Done').id ? 'done' : e.toStatusId === colNamed('In progress').id ? 'prog' : 'todo').join('>'))
+  check('the finishing move knows which sprint it happened in', aHistory[2].sprintIdAtTime === js('JS 1').id)
+  const carryEvents = await db.sprintEvents.where('taskId').equals(jt('PAY-2').id).toArray()
+  check('a carry-over is a move from one sprint to the next',
+    carryEvents.length === 1 && carryEvents[0].fromSprintId === js('JS 1').id && carryEvents[0].toSprintId === js('JS 2').id)
+
+  const jAll = await tasks.listForTeam(jTeam.id)
+  const jVel = velocity([js('JS 1')], jAll, await db.statusEvents.toArray(), jCols)
+  check('velocity reads the imported history', jVel[0].points === 5, String(jVel[0].points))
+  const js2Stats = sprintStats(js('JS 2'), jAll, await db.statusEvents.toArray(), await db.sprintEvents.toArray(), jCols)
+  check('carried work counts as committed in the next sprint', js2Stats.committed === 2 && js2Stats.addedAfterStart === 0,
+    `${js2Stats.committed} committed, ${js2Stats.addedAfterStart} added`)
+  const anaPoints = boardSeries('points', anaAfter, {
+    sprints: await db.sprints.toArray(), tasks: jAll, statusEvents: await db.statusEvents.toArray(),
+    statuses: jCols, availability: [],
+  })
+  check("and so do board KPIs", anaPoints.length === 1 && anaPoints[0].value === 5, JSON.stringify(anaPoints))
+
+  const unchanged = await pullTeam(jTeam.id, fakeJira())
+  check('pulling an unchanged board writes nothing', unchanged.ok && unchanged.written === 0 && unchanged.deleted === 0, unchanged.message)
+
+  await tasks.move(jt('PAY-1').id, colNamed('To do').id, null)
+  await tasks.update(jt('PAY-1').id, { reviewerId: anaJ.id, title: 'Renamed here' })
+  await pullTeam(jTeam.id, fakeJira())
+  const aAfter = (await tasks.get(jt('PAY-1').id))!
+  check('Jira wins on what Jira owns', aAfter.statusId === colNamed('Done').id && aAfter.title === 'Charge the card')
+  check('and the move made here drops out of the history', (await tasks.history(aAfter.id)).length === 3)
+  check('Scrumly-only fields survive a pull', aAfter.reviewerId === anaJ.id)
+
+  await jiraLinks.mapStatus(jTeam.id, '10', colNamed('Code review').id)
+  await pullTeam(jTeam.id, fakeJira())
+  check('a status mapped by hand is its own column, and its own move',
+    (await tasks.history(aAfter.id)).length === 4)
+  await jiraLinks.mapStatus(jTeam.id, '10', null)
+
+  jira.sprint102 = [issueB]
+  jira.deleted.add('1004')
+  const gone = await pullTeam(jTeam.id, fakeJira())
+  check('an issue deleted in Jira is deleted here', gone.ok && gone.removedTasks === 1
+    && !(await tasks.listForTeam(jTeam.id)).some((x) => x.key === 'PAY-4'), gone.message)
+  check('it was asked about by itself first', jira.requests.some((r) => r.startsWith('/rest/api/2/issue/1004')))
+
+  const linked = (await db.teams.get(jTeam.id))!
+  check('each pull is recorded on the link', linked.jira?.lastPull?.ok === true)
+  check('and nothing on the link could be a credential',
+    !JSON.stringify(linked.jira).toLowerCase().includes('token'))
+  await jiraLinks.unlink(jTeam.id)
+  check('unlinking keeps what was imported',
+    !(await db.teams.get(jTeam.id))!.jira && (await tasks.listForTeam(jTeam.id)).length === 3)
 
   console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} FAILED`)
   process.exit(failures === 0 ? 0 : 1)
