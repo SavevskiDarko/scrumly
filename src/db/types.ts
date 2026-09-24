@@ -31,6 +31,12 @@ export interface Team {
   standupOrder?: ID[]
   /** Set when this team mirrors a Jira board. Absent for every team that does not. */
   jira?: JiraLink
+  /**
+   * Kept on this computer only: this team and everything that hangs off it are
+   * never synced, exported or written to the data folder (src/repo/localOnly.ts).
+   * Absent on every team nobody has asked that of.
+   */
+  localOnly?: boolean
 }
 
 /**

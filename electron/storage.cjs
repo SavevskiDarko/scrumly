@@ -17,6 +17,11 @@
  * src/repo/fileStore.ts — the browser folder feature writes the same layout, so
  * one can be pointed at the other's folder and neither is surprised. The two
  * copies exist because a CommonJS main process cannot import the TypeScript.
+ *
+ * A team kept on this computer only (src/repo/localOnly.ts) is left out of that
+ * file, since the folder can be moved into OneDrive or a git repo. It gets the
+ * same layout in a folder of its own under userData, which never moves — the
+ * same reason the Jira token lives there.
  */
 const { app } = require('electron')
 const fs = require('node:fs/promises')
@@ -28,6 +33,7 @@ const HISTORY_DIR = 'history'
 /** Roughly a month of daily snapshots. They are small and compress to nothing. */
 const KEEP_HISTORY = 30
 const CONFIG_FILE = 'config.json'
+const LOCAL_DIR = 'this-computer-only'
 
 /** One dated file per day, rewritten as the day goes on. */
 function historyName(d = new Date()) {
@@ -52,6 +58,16 @@ function defaultDir() {
   return path.join(app.getPath('userData'), 'data')
 }
 
+function localDir() {
+  return path.join(app.getPath('userData'), LOCAL_DIR)
+}
+
+/** The data folder must never be the local one, or one file would overwrite the other. */
+function isLocalDir(dir) {
+  const rel = path.relative(localDir(), path.resolve(dir))
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+}
+
 /**
  * Where the data lives. Read from disk on every call rather than cached: the
  * folder can be changed from Settings, and a stale cache would quietly keep
@@ -72,10 +88,6 @@ async function setDataDir(dir) {
   await fs.writeFile(configPath(), JSON.stringify({ dataDir: dir }, null, 2), 'utf8')
 }
 
-async function liveFile() {
-  return path.join(await dataDir(), LIVE_FILE)
-}
-
 /**
  * Write to a temporary file and rename over the target. Rename is atomic, so a
  * crash or a power cut mid-write cannot leave a half-written scrumly.json —
@@ -88,17 +100,24 @@ async function writeAtomic(file, text) {
   await fs.rename(tmp, file)
 }
 
-async function read() {
+async function readFrom(dir) {
   try {
-    return JSON.parse(await fs.readFile(await liveFile(), 'utf8'))
+    return JSON.parse(await fs.readFile(path.join(dir, LIVE_FILE), 'utf8'))
   } catch {
     return null
   }
 }
 
+async function read() {
+  return readFrom(await dataDir())
+}
+
+async function readLocal() {
+  return readFrom(localDir())
+}
+
 /** Writes the live file, then today's dated snapshot, then prunes old ones. */
-async function write(snapshot, now = new Date()) {
-  const dir = await dataDir()
+async function writeInto(dir, snapshot, now = new Date()) {
   const text = JSON.stringify(snapshot, null, 2)
 
   await fs.mkdir(dir, { recursive: true })
@@ -116,16 +135,35 @@ async function write(snapshot, now = new Date()) {
   return { dir, file: path.join(dir, LIVE_FILE), bytes: Buffer.byteLength(text), at: Date.now() }
 }
 
+async function write(snapshot, now = new Date()) {
+  return writeInto(await dataDir(), snapshot, now)
+}
+
+/**
+ * Only once there is something to keep: until a team is kept here, no folder
+ * at all rather than an empty file in every install. After that it is written
+ * even when empty, so a team let go again cannot come back from a stale copy.
+ */
+async function writeLocal(snapshot, now = new Date()) {
+  const rows = Object.values(snapshot.tables ?? {}).reduce((n, t) => n + (Array.isArray(t) ? t.length : 0), 0)
+  if (rows === 0 && !(await fs.stat(path.join(localDir(), LIVE_FILE)).catch(() => null))) return null
+  return writeInto(localDir(), snapshot, now)
+}
+
 /** What Settings shows: where the file is, and whether anything is in it yet. */
 async function info() {
   const dir = await dataDir()
   const file = path.join(dir, LIVE_FILE)
+  const where = { dir, file, isDefault: dir === defaultDir(), localDir: localDir() }
   try {
     const stat = await fs.stat(file)
-    return { dir, file, exists: true, bytes: stat.size, modifiedAt: stat.mtimeMs, isDefault: dir === defaultDir() }
+    return { ...where, exists: true, bytes: stat.size, modifiedAt: stat.mtimeMs }
   } catch {
-    return { dir, file, exists: false, bytes: 0, modifiedAt: null, isDefault: dir === defaultDir() }
+    return { ...where, exists: false, bytes: 0, modifiedAt: null }
   }
 }
 
-module.exports = { LIVE_FILE, HISTORY_DIR, KEEP_HISTORY, historyName, prunable, dataDir, defaultDir, setDataDir, read, write, info }
+module.exports = {
+  LIVE_FILE, HISTORY_DIR, KEEP_HISTORY, historyName, prunable, dataDir, defaultDir, localDir, isLocalDir, setDataDir,
+  read, write, readLocal, writeLocal, info,
+}

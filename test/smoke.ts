@@ -15,6 +15,10 @@ import { createRequire } from 'node:module'
 import type { JiraBridge } from '../src/desktop/bridge'
 import { jiraLinks, jiraTime, plainText, priorityFrom, type JiraIssue } from '../src/repo/jira'
 import { pullTeam } from '../src/jira/pull'
+import type { Task } from '../src/db/types'
+import { currentScope } from '../src/repo/localOnly'
+import { tracker } from '../src/sync/tracker'
+import { applyIncoming, keepOnThisComputer, readOutgoing, type RemoteRow } from '../src/sync/rows'
 
 let failures = 0
 function check(label: string, cond: boolean, extra = '') {
@@ -1349,6 +1353,112 @@ async function run() {
   await jiraLinks.unlink(jTeam.id)
   check('unlinking keeps what was imported',
     !(await db.teams.get(jTeam.id))!.jira && (await tasks.listForTeam(jTeam.id)).length === 3)
+
+  // ---------- kept on this computer only ----------
+  console.log('\n  -- kept on this computer --')
+  // The tracker saves its queue on a timer, which node has under another name.
+  ;(globalThis as { window?: unknown }).window ??= globalThis
+  tracker.clear()
+
+  // The Jira team above, now with work of Scrumly's own on it too, and a
+  // second team that has nothing to do with it.
+  const home = await teams.create({ name: 'Home' })
+  const homeTask = await tasks.create({ teamId: home.id, statusId: todo.id, title: 'Side project' })
+  const both = await people.create({ name: 'Both Teams', teamIds: [home.id, jTeam.id] })
+  const kTasks = await tasks.listForTeam(jTeam.id)
+  const pay2 = kTasks.find((x) => x.key === 'PAY-2')!
+  const kBlocker = await blockers.open(pay2.id, { reason: 'Waiting on the bank', waitingOnType: 'external', waitingOnText: 'Bank' })
+  await blockers.chase(kBlocker.id, 'Emailed again')
+  const dep = (await links.add(pay2.id, homeTask.id)).link!
+  const retro = await notes.create({ type: 'retro', title: 'JS 1 retro', teamId: jTeam.id })
+  const homeNote = await notes.create({ title: 'Home note', teamId: home.id })
+  const benKpi = (await kpis.add({ personId: ben!.id, name: 'Reviews' })).kpi!
+  await kpis.record(benKpi.id, '2026-03-13', 4)
+
+  check('nothing is kept back until a team asks', (await currentScope()).empty)
+  const everything = await backup.snapshot()
+  await keepOnThisComputer(jTeam.id, true)
+  const kept = await currentScope()
+  const keptAll = (table: string, ids: unknown[]) => ids.length > 0 && ids.every((id) => kept.has(table, id as string))
+  check('the team itself stays here', kept.has('teams', jTeam.id) && (await db.teams.get(jTeam.id))!.localOnly === true)
+  check('and its tasks, sprints and their history', keptAll('tasks', kTasks.map((x) => x.id))
+    && keptAll('sprints', jSprints.map((x) => x.id))
+    && keptAll('statusEvents', await db.statusEvents.where('taskId').equals(pay2.id).primaryKeys())
+    && keptAll('sprintEvents', await db.sprintEvents.where('taskId').equals(pay2.id).primaryKeys()))
+  check('people who are only in that team stay with it', kept.has('people', ben!.id) && kept.has('people', anaJ.id))
+  check('someone also in a team that travels, travels', !kept.has('people', both.id))
+  check('its blockers and their chases stay',
+    kept.has('blockers', kBlocker.id) && keptAll('chases', await db.chases.where('blockerId').equals(kBlocker.id).primaryKeys()))
+  check('a dependency on one of its tasks stays, whichever end it is', kept.has('taskLinks', dep.id))
+  check('so do its notes, and the KPIs of the people who stay', kept.has('notes', retro.id)
+    && kept.has('kpis', benKpi.id) && keptAll('kpiEntries', await db.kpiEntries.where('kpiId').equals(benKpi.id).primaryKeys()))
+  check('every other team is untouched',
+    !kept.has('teams', home.id) && !kept.has('tasks', homeTask.id) && !kept.has('notes', homeNote.id))
+  check('the switch queued all of it for the cloud',
+    tracker.has('teams', jTeam.id) && tracker.has('tasks', pay2.id) && tracker.has('people', ben!.id) && !tracker.has('tasks', homeTask.id))
+
+  const { main, local } = await backup.split()
+  const mainText = JSON.stringify(main)
+  check('a backup leaves all of it out', !main.tables.teams.some((x) => (x as { id: string }).id === jTeam.id)
+    && !mainText.includes('PAY-') && !mainText.includes('Charge the card') && !mainText.includes('Ben Builder')
+    && !mainText.includes('Waiting on the bank') && !mainText.includes('JS 1 retro'))
+  check('and keeps everything else', main.tables.tasks.length + local.tables.tasks.length === await db.tasks.count()
+    && main.tables.teams.some((x) => (x as { id: string }).id === home.id)
+    && main.tables.people.some((x) => (x as { id: string }).id === both.id))
+  check('what it left out is exactly what stays here',
+    local.tables.teams.length === 1 && local.tables.tasks.length === kTasks.length && local.tables.settings.length === 0)
+  check('a plain snapshot is only what may leave', (await backup.snapshot()).tables.tasks.length === main.tables.tasks.length)
+
+  const keptTitle = (await tasks.get(pay2.id))!.title
+  const kr1 = await backup.restore(main)
+  check('restoring a backup leaves what stays here as it is',
+    kr1.ok && (await tasks.listForTeam(jTeam.id)).length === kTasks.length && !!(await db.blockers.get(kBlocker.id)))
+  check('and still restores the rest', kr1.ok && !!(await tasks.get(homeTask.id)))
+  const kr2 = await backup.restore(everything)
+  check('an older backup that still has it does not overwrite it', kr2.ok && (await db.teams.get(jTeam.id))!.localOnly === true)
+  await backup.wipe()
+  const kr3 = await backup.restore(main, local)
+  check('the data file and the local file together are everything again', kr3.ok
+    && (await db.teams.get(jTeam.id))?.localOnly === true && (await tasks.listForTeam(jTeam.id)).length === kTasks.length
+    && !!(await tasks.get(homeTask.id)))
+
+  // Sync, without a server: what goes out, and what coming in may touch.
+  const out = await readOutgoing(tracker.pending())
+  check('it goes out as deleted, with nothing of it in the row',
+    out.length > 0 && out.every((o) => o.data === null) && out.some((o) => o.tbl === 'tasks' && o.id === pay2.id))
+  tracker.clear()
+  tracker.queue([['tasks', homeTask.id]])
+  check('anything else goes out as itself', (await readOutgoing(tracker.pending()))[0]?.data?.title === 'Side project')
+  tracker.clear()
+
+  const remote = (tbl: string, id: string | number, data: unknown): RemoteRow =>
+    ({ user_id: 'me', tbl, id: String(id), data: data as RemoteRow['data'], deleted: data === null, device: 'phone', seq: 1 })
+  await applyIncoming(out.map((o) => remote(o.tbl, o.id, null)), false)
+  check('the cloud deleting it, as it will, deletes nothing here',
+    !!(await db.teams.get(jTeam.id)) && (await tasks.listForTeam(jTeam.id)).length === kTasks.length)
+  check('and sends nothing back', tracker.count() === 0)
+  const stale = { ...(await tasks.get(pay2.id))!, title: 'Edited on the phone' }
+  const stray = { ...stale, id: 'made-on-the-phone', key: 'PAY-99' }
+  await applyIncoming([remote('tasks', stale.id, stale), remote('tasks', stray.id, stray)], false)
+  check('a copy from a device that had not heard yet does not overwrite it', (await tasks.get(pay2.id))!.title === keptTitle)
+  check('nor does a task made there for that team', !(await tasks.get(stray.id)))
+  check('and both are deleted from the cloud in turn', tracker.has('tasks', stale.id) && tracker.has('tasks', stray.id))
+  tracker.clear()
+  await applyIncoming([remote('tasks', homeTask.id, { ...(await tasks.get(homeTask.id))!, title: 'Renamed on the phone' })], false)
+  check('every other row still syncs', (await tasks.get(homeTask.id))!.title === 'Renamed on the phone')
+  const cloud = Object.entries(main.tables).flatMap(([tbl, rows]) => rows.map((r) => remote(tbl, (r as { id: string | number }).id, r)))
+  await applyIncoming(cloud, true)
+  check('taking the synced copy wholesale keeps what stays here', !!(await db.teams.get(jTeam.id))
+    && (await tasks.listForTeam(jTeam.id)).length === kTasks.length && (await tasks.get(homeTask.id))?.title === 'Side project')
+
+  await keepOnThisComputer(jTeam.id, false)
+  check('letting it go queues all of it to be sent again',
+    tracker.has('teams', jTeam.id) && tracker.has('tasks', pay2.id) && tracker.has('people', ben!.id))
+  const back = await readOutgoing(tracker.pending())
+  check('as itself this time', (back.find((o) => o.tbl === 'tasks' && o.id === pay2.id)?.data as Task | null)?.key === 'PAY-2')
+  check('and backups carry it again', (await currentScope()).empty
+    && (await backup.snapshot()).tables.tasks.some((x) => (x as Task).key === 'PAY-2'))
+  tracker.clear()
 
   console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} FAILED`)
   process.exit(failures === 0 ? 0 : 1)

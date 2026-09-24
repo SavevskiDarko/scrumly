@@ -1,7 +1,8 @@
 import { createClient, type RealtimeChannel, type Session, type SupabaseClient } from '@supabase/supabase-js'
-import { ALL_TABLE_NAMES, db } from '../db/schema'
+import { db } from '../db/schema'
 import { SUPABASE_ANON_KEY, SUPABASE_URL, syncConfigured } from './config'
-import { rowKey, splitKey, tracker } from './tracker'
+import { applyIncoming, readOutgoing, type RemoteRow } from './rows'
+import { tracker } from './tracker'
 
 /**
  * Keeps this device's database and the Supabase copy in step.
@@ -23,16 +24,6 @@ const PAGE = 1000
 const BATCH_ROWS = 500
 const BATCH_BYTES = 1_500_000
 
-interface RemoteRow {
-  user_id: string
-  tbl: string
-  id: string
-  data: Record<string, unknown> | null
-  deleted: boolean
-  device: string | null
-  seq: number
-}
-
 export type SyncPhase = 'off' | 'signedOut' | 'starting' | 'choose' | 'syncing' | 'synced' | 'offline' | 'error'
 
 export interface SyncStatus {
@@ -44,8 +35,6 @@ export interface SyncStatus {
   /** When this device and the cloud both have data and it is not yet known which wins. */
   choice: { cloudRows: number } | null
 }
-
-const SYNCED = new Set<string>(ALL_TABLE_NAMES)
 
 function store(key: string, value?: string | null): string | null {
   try {
@@ -65,19 +54,6 @@ const deviceId: string = (() => {
 })()
 
 const cursorKey = (uid: string) => `scrumly-sync-cursor:${uid}`
-
-/** jsonb does not keep key order, so compare rows independently of it. */
-function stable(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`
-  if (v && typeof v === 'object') {
-    return `{${Object.keys(v).sort().filter((k) => (v as Record<string, unknown>)[k] !== undefined)
-      .map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`
-  }
-  return JSON.stringify(v) ?? 'null'
-}
-
-/** Settings is the one table keyed by a number. */
-const localKey = (tbl: string, id: string): string | number => (tbl === 'settings' ? Number(id) : id)
 
 async function databaseHasContent(): Promise<boolean> {
   return (await db.teams.count()) > 0 || (await db.tasks.count()) > 0
@@ -191,7 +167,7 @@ class SyncEngine {
       tracker.setTracking(false)
       tracker.clear()
       const rows = await this.fetchSince(0)
-      await this.apply(rows, true)
+      await applyIncoming(rows, true)
       this.finishStart(uid, rows)
     } catch (err) {
       this.fail(err)
@@ -209,7 +185,7 @@ class SyncEngine {
       await this.push()
       if (tracker.count() > 0) throw new Error('Some rows could not be uploaded')
       const rows = await this.fetchSince(0)
-      await this.apply(rows, false)
+      await applyIncoming(rows, false)
       this.finishStart(uid, rows)
     } catch (err) {
       this.fail(err)
@@ -222,6 +198,8 @@ class SyncEngine {
     tracker.setTracking(true)
     this.listen()
     this.set({ phase: 'synced', lastSyncedAt: Date.now(), pending: tracker.count(), error: null })
+    // Anything the cloud should not have had was queued for deletion on the way in.
+    if (tracker.count()) this.schedulePush()
   }
 
   /** Pull everything again from the start, e.g. after something looked out of step. */
@@ -276,25 +254,9 @@ class SyncEngine {
       if (!entries.length) return
       this.set({ phase: 'syncing' })
 
-      // Read each row as it is now. Gone means deleted.
-      const byTable = new Map<string, [string, number][]>()
-      for (const e of entries) {
-        const [tbl] = splitKey(e[0])
-        if (!SYNCED.has(tbl)) continue
-        byTable.set(tbl, [...(byTable.get(tbl) ?? []), e])
-      }
-      const out: { row: Omit<RemoteRow, 'seq'>; entry: [string, number] }[] = []
-      for (const [tbl, list] of byTable) {
-        const keys = list.map(([k]) => localKey(tbl, splitKey(k)[1]))
-        const rows = await db.table(tbl).bulkGet(keys)
-        list.forEach((entry, i) => {
-          const data = rows[i] as Record<string, unknown> | undefined
-          out.push({
-            entry,
-            row: { user_id: uid, tbl, id: splitKey(entry[0])[1], data: data ?? null, deleted: !data, device: deviceId },
-          })
-        })
-      }
+      // Read each row as it is now. Gone, or kept on this computer, means deleted.
+      const out: { row: Omit<RemoteRow, 'seq'>; entry: [string, number] }[] = (await readOutgoing(entries))
+        .map(({ entry, tbl, id, data }) => ({ entry, row: { user_id: uid, tbl, id, data, deleted: !data, device: deviceId } }))
 
       let batch: typeof out = []
       let bytes = 0
@@ -332,7 +294,7 @@ class SyncEngine {
         // A little overlap: a write that took a number just before the last one
         // seen can commit just after it. Rows already applied are skipped.
         const rows = await this.fetchSince(Math.max(0, cursor - 100))
-        await this.apply(rows, false)
+        await applyIncoming(rows, false)
         const top = rows.reduce((m, r) => Math.max(m, r.seq), cursor)
         store(cursorKey(uid), String(top))
         this.set({
@@ -364,43 +326,6 @@ class SyncEngine {
       if (page.length < PAGE) return all
       from = page[page.length - 1].seq
     }
-  }
-
-  /**
-   * Writes incoming rows. `replace` empties the database first, for a device
-   * taking the cloud's copy. The transaction is marked so the tracker does not
-   * send these rows straight back.
-   */
-  private async apply(rows: RemoteRow[], replace: boolean) {
-    // Only the newest version of each row matters.
-    const latest = new Map<string, RemoteRow>()
-    for (const r of rows) if (SYNCED.has(r.tbl)) latest.set(rowKey(r.tbl, r.id), r)
-    if (!latest.size && !replace) return
-
-    const tables = ALL_TABLE_NAMES.map((n) => db.table(n))
-    await db.transaction('rw', tables, async (tx) => {
-      tracker.markFromServer(tx.idbtrans)
-      if (replace) for (const t of tables) await t.clear()
-      const byTable = new Map<string, RemoteRow[]>()
-      for (const r of latest.values()) byTable.set(r.tbl, [...(byTable.get(r.tbl) ?? []), r])
-      for (const [tbl, list] of byTable) {
-        const table = db.table(tbl)
-        // Unsent changes here win: they are about to be sent.
-        const incoming = list.filter((r) => !tracker.has(tbl, r.id))
-        if (!incoming.length) continue
-        const keys = incoming.map((r) => localKey(tbl, r.id))
-        const current = replace ? [] : await table.bulkGet(keys)
-        const puts: unknown[] = []
-        const dels: (string | number)[] = []
-        incoming.forEach((r, i) => {
-          const have = current[i]
-          if (r.deleted || !r.data) { if (replace || have !== undefined) dels.push(keys[i]) }
-          else if (replace || have === undefined || stable(have) !== stable(r.data)) puts.push(r.data)
-        })
-        if (puts.length) await table.bulkPut(puts)
-        if (dels.length && !replace) await table.bulkDelete(dels)
-      }
-    })
   }
 }
 

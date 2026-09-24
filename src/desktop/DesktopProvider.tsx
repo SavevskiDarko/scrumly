@@ -1,7 +1,7 @@
 import Dexie from 'dexie'
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { backup } from '../repo'
-import { db } from '../db/schema'
+import { APP_ID, backup } from '../repo/backup'
+import { SCHEMA_VERSION, db } from '../db/schema'
 import { type DesktopInfo, desktopApi, isDesktop } from './bridge'
 
 const DEBOUNCE = 2500
@@ -40,6 +40,9 @@ const IDLE: DesktopStatus = {
   state: 'off', boot: 'browser', info: null, lastSavedAt: null, error: null, restored: null,
 }
 
+/** Stands in for a missing data file when there is still a local one to load. */
+const NO_FILE = { app: APP_ID, schemaVersion: SCHEMA_VERSION, exportedAt: '', tables: {} }
+
 /** Empty means empty of *content*: a settings row is created before any team is. */
 async function databaseIsEmpty(): Promise<boolean> {
   return (await db.teams.count()) === 0 && (await db.tasks.count()) === 0
@@ -59,6 +62,9 @@ async function databaseIsEmpty(): Promise<boolean> {
  * must never be followed by an autosave, or a one-line parse error turns into
  * an empty file where the data used to be. `held` blocks every write until
  * someone looks at it.
+ *
+ * A team kept on this computer only is never in that file. It has one of its
+ * own that never moves, written and read alongside, by the same rules.
  */
 export function DesktopProvider({ children }: { children: React.ReactNode }) {
   const [booted, setBooted] = useState(() => !isDesktop())
@@ -77,8 +83,9 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
     running.current = true
     setStatus((s) => ({ ...s, state: 'saving' }))
     try {
-      const snapshot = await backup.snapshot()
-      const write = await api.save(snapshot)
+      const { main, local } = await backup.split()
+      const write = await api.save(main)
+      await api.saveLocal?.(local)
       const info = await api.info()
       setStatus((s) => ({ ...s, state: 'saved', info, lastSavedAt: write.at, error: null }))
     } catch (err) {
@@ -109,10 +116,11 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
       let next: DesktopStatus = { ...IDLE, state: 'idle', boot: 'fresh' }
       try {
         const raw = await api.load()
-        if (raw === null || raw === undefined) {
+        const local = (await api.loadLocal?.()) ?? null
+        if ((raw === null || raw === undefined) && local === null) {
           next.boot = 'fresh'
         } else if (await databaseIsEmpty()) {
-          const result = await backup.restore(raw)
+          const result = await backup.restore(raw ?? NO_FILE, local ?? undefined)
           if (result.ok) {
             next.boot = 'restored'
             next.restored = { tasks: result.counts?.tasks ?? 0, people: result.counts?.people ?? 0 }
@@ -181,7 +189,8 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
     if (!api) return { ok: false, error: 'Not running as a desktop app' }
     const raw = await api.load()
     if (raw === null || raw === undefined) return { ok: false, error: 'There is no data file to load yet' }
-    const result = await backup.restore(raw)
+    // Its local counterpart too, when there is one; otherwise what is kept here stays as it is.
+    const result = await backup.restore(raw, (await api.loadLocal?.()) ?? undefined)
     if (result.ok) {
       held.current = false
       setStatus((s) => ({ ...s, state: 'idle', boot: 'restored', error: null }))

@@ -61,6 +61,13 @@ export function Settings() {
   }, [], {} as Record<string, { tasks: number; members: number; sprints: number }>)
 
   const team = teams.find((t) => t.id === cfg?.activeTeamId) ?? teams[0]
+  // Kept on this computer only: never in the data file, a backup, or sync.
+  const keptHere = teams.filter((t) => t.localOnly)
+  const keptNames = keptHere.map((t) => t.name).join(', ')
+  const keptVerb = keptHere.length === 1 ? 'is' : 'are'
+  const keptNote = keptHere.length
+    ? `\n\n${keptNames} ${keptVerb} left as ${keptHere.length === 1 ? 'it is' : 'they are'}: kept on this computer only, and never in a backup.`
+    : ''
   // Past holidays still count — they are what keeps old sprints' capacity
   // honest — but nobody needs to see last year's list every time.
   const holidays = cfg?.holidays ?? []
@@ -92,7 +99,7 @@ export function Settings() {
     if (!parsed) { toast(`No ${LIVE_FILE} in that folder yet`, true); return }
     const ok = confirm(
       `Restore from the folder copy?\n\nThis replaces everything currently in Scrumly — ${counts.tasks} tasks, ` +
-      `${counts.people} people and ${counts.events} recorded moves — and cannot be undone.`,
+      `${counts.people} people and ${counts.events} recorded moves — and cannot be undone.${keptNote}`,
     )
     if (!ok) return
     const result = await backup.restore(parsed)
@@ -127,7 +134,7 @@ export function Settings() {
       const ok = confirm(
         `Restore from ${file.name}?\n\n` +
         `This replaces everything currently in Scrumly — ${counts.tasks} tasks, ` +
-        `${counts.people} people and ${counts.events} recorded moves — and cannot be undone.`,
+        `${counts.people} people and ${counts.events} recorded moves — and cannot be undone.${keptNote}`,
       )
       if (!ok) return
       const result = await backup.restore(parsed)
@@ -161,6 +168,11 @@ export function Settings() {
               <div key={t.id} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--line)' }}>
                 <input className="inline-input" style={{ flex: 1, fontWeight: t.id === team?.id ? 600 : 400 }}
                   defaultValue={t.name} onBlur={(e) => teamRepo.update(t.id, { name: e.target.value })} />
+                {t.localOnly && (
+                  <span className="chip" title="Not synced, exported in backups or written to the data folder. Change it under Jira.">
+                    this computer only
+                  </span>
+                )}
                 <input className="input" style={{ width: 110 }} defaultValue={t.keyPrefix}
                   onBlur={(e) => teamRepo.update(t.id, { keyPrefix: e.target.value })} />
                 <span style={{ width: 150 }} className="small faint">
@@ -336,6 +348,13 @@ export function Settings() {
               <button className="btn sm" onClick={loadFromDataFile}>Load from file</button>
             </div>
 
+            {keptHere.length > 0 && (
+              <p className="small faint" style={{ marginBottom: 0, marginTop: 10 }}>
+                {keptNames} {keptVerb} kept on this computer only, so not in this file. {keptHere.length === 1 ? 'It is' : 'They are'} saved
+                in <code>{desk.status.info?.localDir ?? 'a folder of its own'}</code> instead, which never moves.
+              </p>
+            )}
+
             {desk.status.error && (
               <p className="small" style={{ color: 'var(--alert)', marginBottom: 0, marginTop: 10 }}>
                 {desk.status.error}
@@ -424,6 +443,7 @@ export function Settings() {
             {onDesktop
               ? 'The data file above is already a copy you can read without Scrumly. An export is the same JSON, saved wherever you point it — worth one before anything drastic.'
               : 'Everything lives in this browser on this machine. A backup is plain JSON you can read without Scrumly, and it is the only copy that exists anywhere else.'}
+            {keptHere.length > 0 && ` It leaves out ${keptNames}, which ${keptVerb} kept on this computer only.`}
           </p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <button className="btn primary" onClick={doExport}>Export a backup</button>

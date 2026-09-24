@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('scrumlyDesktop', {
   info: () => ipcRenderer.invoke('scrumly:info'),
   load: () => ipcRenderer.invoke('scrumly:load'),
   save: (snapshot) => ipcRenderer.invoke('scrumly:save', snapshot),
+  loadLocal: () => ipcRenderer.invoke('scrumly:load-local'),
+  saveLocal: (snapshot) => ipcRenderer.invoke('scrumly:save-local', snapshot),
   chooseDir: () => ipcRenderer.invoke('scrumly:choose-dir'),
   reveal: () => ipcRenderer.invoke('scrumly:reveal'),
   jira: {

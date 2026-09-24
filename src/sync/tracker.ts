@@ -86,6 +86,17 @@ export const tracker = {
     }
   },
 
+  /**
+   * Rows that must go out whether or not anyone is signed in right now: a team
+   * kept on this computer from today still has to be deleted from the cloud,
+   * even if that waits for the next sign-in.
+   */
+  queue(rows: [table: string, id: string][]) {
+    const byTable = new Map<string, string[]>()
+    for (const [table, id] of rows) byTable.set(table, [...(byTable.get(table) ?? []), id])
+    for (const [table, ids] of byTable) mark(table, ids)
+  },
+
   clear() {
     dirty.clear()
     persist()

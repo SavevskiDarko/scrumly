@@ -171,6 +171,9 @@ function registerIpc() {
   ipcMain.handle('scrumly:info', () => storage.info())
   ipcMain.handle('scrumly:load', () => storage.read())
   ipcMain.handle('scrumly:save', (_e, snapshot) => storage.write(snapshot))
+  // What is kept on this computer only: always the same folder under userData.
+  ipcMain.handle('scrumly:load-local', () => storage.readLocal())
+  ipcMain.handle('scrumly:save-local', (_e, snapshot) => storage.writeLocal(snapshot))
   ipcMain.handle('scrumly:reveal', async () => { void shell.openPath(await storage.dataDir()) })
 
   // The token goes in through connect and never comes back out: status reports
@@ -191,6 +194,11 @@ function registerIpc() {
       ? await dialog.showOpenDialog(mainWindow, options)
       : await dialog.showOpenDialog(options)
     if (result.canceled || !result.filePaths[0]) return null
+    if (storage.isLocalDir(result.filePaths[0])) {
+      dialog.showErrorBox('Choose another folder',
+        'That folder holds what is kept on this computer only. The data file needs a folder of its own.')
+      return null
+    }
     await storage.setDataDir(result.filePaths[0])
     return storage.info()
   })
