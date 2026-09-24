@@ -1,5 +1,5 @@
 import { db } from '../db/schema'
-import type { Conversion, ID, Note, NoteType } from '../db/types'
+import type { Conversion, FollowUp, ID, Note, NoteType, Sprint, Task } from '../db/types'
 import { followUps } from './followUps'
 import { newId } from './ids'
 import { tasks } from './tasks'
@@ -46,6 +46,28 @@ export const notes = {
   conversionsFor: (noteId: ID) => db.conversions.where('noteId').equals(noteId).toArray(),
 
   /**
+   * The retro before this one, for the same team. A new retro opens with what
+   * happened to that one's actions, which is the only honest answer to "was
+   * the last one worth having".
+   */
+  async previousRetro(note: Note): Promise<Note | null> {
+    const retros = await db.notes.where('type').equals('retro').toArray()
+    const earlier = retros
+      .filter((n) => n.id !== note.id && n.teamId === note.teamId && n.createdAt < note.createdAt)
+      .sort((a, b) => b.createdAt - a.createdAt)
+    return earlier[0] ?? null
+  },
+
+  /** One retro per sprint: found again if it exists, made if it does not. */
+  async retroFor(teamId: ID, sprint: Sprint): Promise<Note> {
+    const existing = await db.notes.where('sprintId').equals(sprint.id)
+      .filter((n) => n.type === 'retro' && n.teamId === teamId)
+      .first()
+    if (existing) return existing
+    return notes.create({ type: 'retro', teamId, sprintId: sprint.id, title: `${sprint.name} retrospective` })
+  },
+
+  /**
    * A retro line becomes either a task for a developer or a follow-up for you.
    * Sending both into the backlog is how retro actions die, so the choice is
    * forced at the point of conversion — and the link back is kept, so next
@@ -80,4 +102,49 @@ export const notes = {
     await db.conversions.add(conversion)
     return { ok: true, id: createdId, label }
   },
+}
+
+export interface ActionOutcome {
+  conversionId: ID
+  kind: 'task' | 'followUp'
+  targetId: ID
+  title: string
+  done: boolean
+  /** Deleted since. Counted, because an action that vanished did not land either. */
+  gone: boolean
+  statusId: ID | null
+}
+
+/** What each thing a note turned into has come to. Open ones first — they are the agenda. */
+export function actionOutcomes(
+  conversions: Conversion[],
+  tasks: Task[],
+  follow: FollowUp[],
+  doneIds: Set<ID>,
+): ActionOutcome[] {
+  const taskById = new Map(tasks.map((t) => [t.id, t]))
+  const fuById = new Map(follow.map((f) => [f.id, f]))
+  const rank = (o: ActionOutcome) => (o.done ? 2 : o.gone ? 1 : 0)
+  return conversions
+    .map((c): ActionOutcome => {
+      if (c.createdType === 'task') {
+        const t = taskById.get(c.createdId)
+        return {
+          conversionId: c.id, kind: 'task', targetId: c.createdId,
+          title: t?.title ?? 'A task that has since been deleted',
+          done: t ? doneIds.has(t.statusId) : false,
+          gone: !t,
+          statusId: t?.statusId ?? null,
+        }
+      }
+      const f = fuById.get(c.createdId)
+      return {
+        conversionId: c.id, kind: 'followUp', targetId: c.createdId,
+        title: f?.title ?? 'A follow-up that has since been deleted',
+        done: Boolean(f?.doneAt),
+        gone: !f,
+        statusId: null,
+      }
+    })
+    .sort((a, b) => rank(a) - rank(b))
 }

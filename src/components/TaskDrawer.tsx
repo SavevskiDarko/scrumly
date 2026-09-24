@@ -7,6 +7,7 @@ import { usePickablePeople } from '../hooks/useTeamPeople'
 import { boards as boardRepo, daysInStatus, sprints as sprintRepo, tasks as taskRepo } from '../repo'
 import { Avatar } from './Avatar'
 import { BlockedPanel } from './BlockedPanel'
+import { DependencyPanel } from './DependencyPanel'
 import { useToast } from './Toast'
 
 const PRIORITIES: Priority[] = ['low', 'normal', 'high', 'urgent']
@@ -117,6 +118,8 @@ export function TaskDrawer({ taskId }: { taskId: ID }) {
               onBlur={() => desc !== task.description && taskRepo.update(task.id, { description: desc })}
             />
           </div>
+
+          <DependencyPanel task={task} />
 
           <div>
             <p className="panel-title">

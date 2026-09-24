@@ -7,8 +7,8 @@ import { go, setParam } from '../hooks/useRoute'
 import { useTeamPeople } from '../hooks/useTeamPeople'
 import {
   blockedDays, blockers as blockerRepo, buildIndex, daysInStatus, describeWaitingOn,
-  filterByBucket, followUps as fuRepo, loadByPerson, queues, sprints as sprintRepo,
-  sprintStats, standups, type BoardIndex, type Bucket,
+  filterByBucket, followUps as fuRepo, loadByPerson, queues, settings as settingsRepo,
+  sprints as sprintRepo, sprintStats, standups, type BoardIndex, type Bucket,
 } from '../repo'
 
 /**
@@ -45,6 +45,7 @@ function Kpi({ n, label, hot, onClick, title }: {
 
 export function Today({ teamId }: { teamId: string }) {
   const [followTab, setFollowTab] = useState<'open' | 'done'>('open')
+  const cfg = useLiveQuery(() => settingsRepo.get(), [])
   const statuses = useLiveQuery(() => db.statuses.orderBy('order').toArray(), [], [])
   const people = useTeamPeople(teamId)
   const tasks = useLiveQuery(() => db.tasks.where('teamId').equals(teamId).toArray(), [teamId], [])
@@ -113,7 +114,7 @@ export function Today({ teamId }: { teamId: string }) {
 
       <div className="screen pad">
         {sprint && (() => {
-          const st = sprintStats(sprint, tasks, statusEvents, sprintEvents, statuses)
+          const st = sprintStats(sprint, tasks, statusEvents, sprintEvents, statuses, { holidays: cfg?.holidays })
           const pct = st.total ? Math.round((st.done / st.total) * 100) : 0
           return (
             <button className="sprint-strip" onClick={() => go('sprints')}>

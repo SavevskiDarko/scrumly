@@ -16,14 +16,19 @@ export function endOfDay(iso: string): number {
   return new Date(`${iso}T23:59:59`).getTime()
 }
 
-/** Monday to Friday only — a two-week sprint burns down over ten points, not fourteen. */
-export function workingDays(startISO: string, endISO: string): string[] {
+/**
+ * Monday to Friday only — a two-week sprint burns down over ten points, not
+ * fourteen. Holidays come out too, or a sprint with a bank holiday in it holds
+ * the team to a day's work nobody was ever going to do.
+ */
+export function workingDays(startISO: string, endISO: string, holidays: readonly string[] = []): string[] {
+  const off = new Set(holidays)
   const out: string[] = []
   let cur = startISO
   let guard = 0
   while (cur <= endISO && guard++ < 400) {
     const day = new Date(`${cur}T12:00:00`).getDay()
-    if (day !== 0 && day !== 6) out.push(cur)
+    if (day !== 0 && day !== 6 && !off.has(cur)) out.push(cur)
     cur = addDays(cur, 1)
   }
   return out
@@ -143,9 +148,11 @@ export const sprints = {
   },
 
   async remove(id: ID) {
-    await db.transaction('rw', db.sprints, db.tasks, db.sprintEvents, async () => {
+    await db.transaction('rw', db.sprints, db.tasks, db.sprintEvents, db.availability, async () => {
       const inSprint = await db.tasks.where('sprintId').equals(id).toArray()
       for (const t of inSprint) await taskRepo.setSprint(t.id, null)
+      // Availability only means anything for the sprint it was entered against.
+      await db.availability.where('sprintId').equals(id).delete()
       await db.sprints.delete(id)
     })
   },
@@ -185,8 +192,9 @@ export function sprintStats(
   statusEvents: { taskId: ID; toStatusId: ID; at: number }[],
   sprintEvents: SprintEvent[],
   statuses: Status[],
-  now = Date.now(),
+  opts: { now?: number; holidays?: readonly string[] } = {},
 ): SprintStats {
+  const now = opts.now ?? Date.now()
   const doneIds = new Set(statuses.filter((s) => s.isDone).map((s) => s.id))
   const inSprint = tasks.filter((t) => t.sprintId === sprint.id)
   const ids = new Set(inSprint.map((t) => t.id))
@@ -226,7 +234,7 @@ export function sprintStats(
   ).length
 
   const totalPoints = inSprint.reduce((sum, t) => sum + weightOf(t), 0)
-  const days = workingDays(sprint.startDate, sprint.endDate)
+  const days = workingDays(sprint.startDate, sprint.endDate, opts.holidays)
   const series: BurndownPoint[] = days.map((date, i) => {
     const t = Math.min(endOfDay(date), now)
     let remaining = 0
@@ -272,8 +280,21 @@ export interface SprintOutcome {
   tasks: number
 }
 
+/** Status events grouped by task, oldest first. */
+export function eventsByTask(statusEvents: StatusEvent[]): Map<ID, StatusEvent[]> {
+  const byTask = new Map<ID, StatusEvent[]>()
+  for (const e of statusEvents) {
+    const list = byTask.get(e.taskId) ?? []
+    list.push(e)
+    byTask.set(e.taskId, list)
+  }
+  for (const list of byTask.values()) list.sort((a, b) => a.at - b.at)
+  return byTask
+}
+
 /**
- * Points delivered per sprint, for velocity.
+ * The tasks a sprint delivered: finished by the time it closed, and finished
+ * while they belonged to it.
  *
  * Read from the move history rather than from what still sits in the sprint:
  * closing carries unfinished work out, so counting current membership would
@@ -283,6 +304,23 @@ export interface SprintOutcome {
  * sprint the task belonged to at that moment since v1, so "finished while in
  * this sprint" is a fact in the log rather than something inferred afterwards.
  */
+export function finishedIn(
+  sprint: Sprint,
+  tasks: Task[],
+  byTask: Map<ID, StatusEvent[]>,
+  doneIds: Set<ID>,
+): Task[] {
+  const at = sprint.closedAt ?? endOfDay(sprint.endDate)
+  return tasks.filter((task) => {
+    const list = byTask.get(task.id)
+    if (!list) return false
+    let last: StatusEvent | null = null
+    for (const e of list) { if (e.at <= at) last = e; else break }
+    return !!last && doneIds.has(last.toStatusId) && last.sprintIdAtTime === sprint.id
+  })
+}
+
+/** Points delivered per sprint, for velocity. */
 export function velocity(
   closed: Sprint[],
   tasks: Task[],
@@ -290,28 +328,16 @@ export function velocity(
   statuses: Status[],
 ): SprintOutcome[] {
   const doneIds = new Set(statuses.filter((s) => s.isDone).map((s) => s.id))
-  const byTask = new Map<ID, StatusEvent[]>()
-  for (const e of statusEvents) {
-    const list = byTask.get(e.taskId) ?? []
-    list.push(e)
-    byTask.set(e.taskId, list)
-  }
-  for (const list of byTask.values()) list.sort((a, b) => a.at - b.at)
+  const byTask = eventsByTask(statusEvents)
 
   return closed.map((sprint) => {
-    const at = sprint.closedAt ?? endOfDay(sprint.endDate)
-    let points = 0
-    let count = 0
-    for (const task of tasks) {
-      const list = byTask.get(task.id)
-      if (!list) continue
-      let last: StatusEvent | null = null
-      for (const e of list) { if (e.at <= at) last = e; else break }
-      // Finished, and finished while it belonged to this sprint.
-      if (!last || !doneIds.has(last.toStatusId) || last.sprintIdAtTime !== sprint.id) continue
-      points += weightOf(task)
-      count++
+    const done = finishedIn(sprint, tasks, byTask, doneIds)
+    return {
+      sprintId: sprint.id,
+      name: sprint.name,
+      endDate: sprint.endDate,
+      points: done.reduce((sum, t) => sum + weightOf(t), 0),
+      tasks: done.length,
     }
-    return { sprintId: sprint.id, name: sprint.name, endDate: sprint.endDate, points, tasks: count }
   })
 }

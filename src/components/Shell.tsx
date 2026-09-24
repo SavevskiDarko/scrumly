@@ -13,6 +13,7 @@ const NAV = [
   { id: 'boards', label: 'Boards' },
   { id: 'notes', label: 'Notes' },
   { id: 'sprints', label: 'Sprints' },
+  { id: 'planning', label: 'Sprint planning' },
   { id: 'pi', label: 'PI Planning' },
   { id: 'people', label: 'People' },
 ]

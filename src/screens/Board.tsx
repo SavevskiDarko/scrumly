@@ -9,6 +9,7 @@ import { QuickAdd } from '../components/QuickAdd'
 import { TaskCard, TaskFace } from '../components/TaskCard'
 import { db } from '../db/schema'
 import type { Person, Status, Task } from '../db/types'
+import { useDependencies, type DepInfo } from '../hooks/useDependencies'
 import { go, setParam, useRoute } from '../hooks/useRoute'
 import { useTeamPeople } from '../hooks/useTeamPeople'
 import {
@@ -26,10 +27,10 @@ const BUCKET_LABEL: Record<Bucket, string> = {
 const byOrder = (a: Task, b: Task) => a.orderInColumn - b.orderInColumn
 
 function StatusColumn({
-  status, items, total, people, teamId, ix, filtered, onOpen,
+  status, items, total, people, teamId, ix, filtered, depOf, onOpen,
 }: {
   status: Status; items: Task[]; total: number; people: Person[]; teamId: string
-  ix: BoardIndex; filtered: boolean; onOpen: (id: string) => void
+  ix: BoardIndex; filtered: boolean; depOf: (t: Task) => DepInfo | null; onOpen: (id: string) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `col:${status.id}` })
   // Measured against everything in the column, not what a filter left visible:
@@ -48,6 +49,7 @@ function StatusColumn({
             owner={ownerOf(t, status, ix)}
             assignee={t.assigneeId ? ix.byPerson.get(t.assigneeId) ?? null : null}
             blocker={ix.blockerByTask.get(t.id) ?? null}
+            dep={depOf(t)}
             onOpen={onOpen} />
         ))}
         {items.length === 0 && !filtered && <div className="small faint" style={{ padding: '6px 4px' }}>Nothing here</div>}
@@ -58,8 +60,11 @@ function StatusColumn({
 }
 
 function Cell({
-  personKey, status, items, ix, onOpen,
-}: { personKey: string; status: Status; items: Task[]; ix: BoardIndex; onOpen: (id: string) => void }) {
+  personKey, status, items, ix, depOf, onOpen,
+}: {
+  personKey: string; status: Status; items: Task[]; ix: BoardIndex
+  depOf: (t: Task) => DepInfo | null; onOpen: (id: string) => void
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: `cell:${personKey}:${status.id}` })
   return (
     <div ref={setNodeRef} className={`cell${isOver ? ' over' : ''}`}>
@@ -67,6 +72,7 @@ function Cell({
         <TaskCard key={t.id} task={t} status={status} orderable={false}
           owner={ownerOf(t, status, ix)}
           blocker={ix.blockerByTask.get(t.id) ?? null}
+          dep={depOf(t)}
           onOpen={onOpen} />
       ))}
     </div>
@@ -89,6 +95,7 @@ export function Board({ teamId }: { teamId: string }) {
   const sprintList = useLiveQuery(() => sprintRepo.listForTeam(teamId), [teamId], [])
 
   const ix = buildIndex(statuses, people, openBlockers)
+  const depOf = useDependencies(all, ix.doneIds)
   const sprintFilter = route.params.get('sprint')
 
   let visible = all
@@ -205,7 +212,7 @@ export function Board({ teamId }: { teamId: string }) {
                         </div>
                       </div>
                       {statuses.map((s) => (
-                        <Cell key={s.id} personKey={key} status={s} ix={ix}
+                        <Cell key={s.id} personKey={key} status={s} ix={ix} depOf={depOf}
                           items={mine.filter((t) => t.statusId === s.id).sort(byOrder)}
                           onOpen={(id) => setParam('task', id)} />
                       ))}
@@ -220,7 +227,7 @@ export function Board({ teamId }: { teamId: string }) {
             ) : (
               <div className="board">
                 {statuses.map((s) => (
-                  <StatusColumn key={s.id} status={s} teamId={teamId} people={people} ix={ix} filtered={filtered}
+                  <StatusColumn key={s.id} status={s} teamId={teamId} people={people} ix={ix} filtered={filtered} depOf={depOf}
                     items={visible.filter((t) => t.statusId === s.id).sort(byOrder)}
                     total={all.filter((t) => t.statusId === s.id).length}
                     onOpen={(id) => setParam('task', id)} />
@@ -232,7 +239,8 @@ export function Board({ teamId }: { teamId: string }) {
                 <div className="drag-ghost">
                   <TaskFace task={dragging} status={ix.byStatus.get(dragging.statusId)}
                     owner={ownerOf(dragging, ix.byStatus.get(dragging.statusId), ix)}
-                    blocker={ix.blockerByTask.get(dragging.id) ?? null} />
+                    blocker={ix.blockerByTask.get(dragging.id) ?? null}
+                    dep={depOf(dragging)} />
                 </div>
               )}
             </DragOverlay>

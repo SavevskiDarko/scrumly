@@ -5,6 +5,8 @@ import {
   flowStats, followUps, groupWaitingOn, loadByPerson, ownerFieldFor, ownerOf,
   parseQuickAdd, people, queues, rotate, notes, settings, sprints, sprintStats,
   standups, statuses, tasks, teams, velocity, workingDays, addDays, nextWeekday,
+  actionOutcomes, availability, capacityPlan, dependencyState, links, worstState,
+  kpis, boardSeries, readKpi, kpiStatus, kpiSummary, formatKpiValue,
 } from '../src/repo'
 import { flowSkeleton, looksLikeFlow, parseFlow } from '../src/canvas/quickFlow'
 import { fileStore, historyName, prunable } from '../src/repo/fileStore'
@@ -705,6 +707,308 @@ async function run() {
   const planned = await sprints.plan({ teamId: rTeam.id, lengthDays: 14, startDate: previewStart })
   check('the sprint length shown at setup is the one you get',
     planned.endDate === previewEnd, `${planned.endDate} vs ${previewEnd}`)
+
+  // ---------- sprint planning and capacity ----------
+  console.log('\n  -- planning --')
+
+  check('a holiday comes out of the working days',
+    workingDays('2026-09-14', '2026-09-27', ['2026-09-16']).length === 9)
+  check('a holiday that falls on a weekend changes nothing',
+    workingDays('2026-09-14', '2026-09-27', ['2026-09-19']).length === 10)
+
+  await settings.addHoliday('2026-12-25')
+  await settings.addHoliday('2026-12-25')
+  check('a holiday is stored once', (await settings.get()).holidays.filter((d) => d === '2026-12-25').length === 1)
+  await settings.removeHoliday('2026-12-25')
+  check('and can be taken out again', !(await settings.get()).holidays.includes('2026-12-25'))
+  await db.settings.update(1, { holidays: undefined } as never)
+  check('a settings row from before holidays existed reads as none',
+    Array.isArray((await settings.get()).holidays) && (await settings.get()).holidays.length === 0)
+
+  const pTeam = await teams.create({ name: 'Planning Team' })
+  const ana = await people.create({ name: 'Ana Planner', teamIds: [pTeam.id] })
+  const bo = await people.create({ name: 'Bo Planner', teamIds: [pTeam.id] })
+  const pCols = await statuses.list()
+  const pTodo = pCols.find((s) => s.name === 'To do') ?? pCols[1]
+  const pProg = pCols.find((s) => s.countsAsActive)!
+  const pDone = pCols.find((s) => s.isDone)!
+
+  // Ten working days, two people, twenty points delivered: one point per person-day.
+  const pPast = await sprints.plan({ teamId: pTeam.id, lengthDays: 14, startDate: '2026-08-31' })
+  await sprints.activate(pPast.id)
+  for (const size of [12, 8]) {
+    const t = await tasks.create({ teamId: pTeam.id, statusId: pTodo.id, title: `Delivered ${size}`, size })
+    await tasks.setSprint(t.id, pPast.id)
+    await tasks.move(t.id, pProg.id, null)
+    await tasks.move(t.id, pDone.id, null)
+  }
+  await sprints.close(pPast.id, null, [])
+  const pNext = await sprints.plan({ teamId: pTeam.id, lengthDays: 14, startDate: '2026-09-14' })
+
+  const n1 = await tasks.create({ teamId: pTeam.id, statusId: pTodo.id, title: 'Big one', size: 8, assigneeId: ana.id })
+  const n2 = await tasks.create({ teamId: pTeam.id, statusId: pTodo.id, title: 'Small one', size: 3, assigneeId: bo.id })
+  const n3 = await tasks.create({ teamId: pTeam.id, statusId: pTodo.id, title: 'Nobody sized or owns this' })
+  for (const t of [n1, n2, n3]) await tasks.setSprint(t.id, pNext.id)
+
+  const readPlan = async (holidays: string[] = []) => {
+    const all = await sprints.listForTeam(pTeam.id)
+    const teamTasks = await tasks.listForTeam(pTeam.id)
+    return capacityPlan({
+      sprint: (await sprints.get(pNext.id))!,
+      members: await people.listActiveForTeam(pTeam.id),
+      tasks: teamTasks,
+      availability: await availability.forSprints(all.map((s) => s.id)),
+      history: velocity(all.filter((s) => s.state === 'closed'), teamTasks, await db.statusEvents.toArray(), await statuses.list()),
+      sprints: all,
+      holidays,
+    })
+  }
+
+  let cap = await readPlan()
+  check('the forecast reads what the team delivered', cap.forecast === 20 && cap.averageVelocity === 20,
+    `${cap.forecast} / ${cap.averageVelocity}`)
+  check('capacity is every working day when nobody is out', cap.personDays === 20 && cap.fullPersonDays === 20)
+  check('planned points count an unsized task as one', cap.plannedPoints === 12, String(cap.plannedPoints))
+  check('unsized and unassigned work is called out', cap.unsized === 1 && cap.unassignedPoints === 1)
+
+  await availability.set(ana.id, pNext.id, 5)
+  cap = await readPlan()
+  check('someone out half the sprint shrinks the forecast', cap.forecast === 15, String(cap.forecast))
+  const anaRow = cap.rows.find((r) => r.person.id === ana.id)!
+  check('and their share with it', anaRow.share === 5 && anaRow.entered, JSON.stringify(anaRow))
+  check('their planned points are theirs alone', anaRow.points === 8, String(anaRow.points))
+
+  await availability.set(ana.id, pNext.id, 6)
+  check('entering days again updates rather than duplicates',
+    (await availability.forSprint(pNext.id)).filter((a) => a.personId === ana.id).length === 1)
+  await availability.set(ana.id, pNext.id, 30)
+  cap = await readPlan()
+  check('more days than the sprint has are capped at the sprint',
+    cap.rows.find((r) => r.person.id === ana.id)!.days === 10)
+  await availability.set(ana.id, pNext.id, null)
+  cap = await readPlan()
+  check('clearing it goes back to every working day',
+    (await availability.forSprint(pNext.id)).length === 0 && !cap.rows.find((r) => r.person.id === ana.id)!.entered)
+
+  cap = await readPlan(['2026-09-16'])
+  check('a holiday shrinks the sprint and the forecast', cap.workingDays === 9 && cap.forecast === 18,
+    `${cap.workingDays} days, ${cap.forecast} points`)
+
+  const scratch = await sprints.plan({ teamId: pTeam.id, lengthDays: 14, startDate: '2026-12-07' })
+  await availability.set(bo.id, scratch.id, 3)
+  await sprints.remove(scratch.id)
+  check('deleting a sprint takes its availability with it',
+    (await availability.forSprint(scratch.id)).length === 0)
+
+  // ---------- dependencies ----------
+  console.log('\n  -- dependencies --')
+
+  const qTeam = await teams.create({ name: 'Other Team' })
+  const api = await tasks.create({ teamId: qTeam.id, statusId: pTodo.id, title: 'Payment API' })
+  const ui = await tasks.create({ teamId: pTeam.id, statusId: pTodo.id, title: 'Checkout UI' })
+  const docs = await tasks.create({ teamId: pTeam.id, statusId: pTodo.id, title: 'Checkout docs' })
+
+  check("a task can wait on another team's task", (await links.add(api.id, ui.id)).ok)
+  check('the same dependency twice is refused', !(await links.add(api.id, ui.id)).ok)
+  check('a task cannot wait on itself', !(await links.add(ui.id, ui.id)).ok)
+  check('a direct loop is refused', !(await links.add(ui.id, api.id)).ok)
+  check('a chain is fine', (await links.add(ui.id, docs.id)).ok)
+  check('but closing it into a loop is not', !(await links.add(docs.id, api.id)).ok)
+  const around = await links.forTask(ui.id)
+  check('a task sees what it waits on and what waits on it',
+    around.waitsOn.length === 1 && around.holdsUp.length === 1)
+
+  const qS1 = await sprints.plan({ teamId: qTeam.id, lengthDays: 14, startDate: '2026-09-14' })
+  const qS2 = await sprints.plan({ teamId: qTeam.id, lengthDays: 14, startDate: '2026-09-28' })
+  const pS2 = await sprints.plan({ teamId: pTeam.id, lengthDays: 14, startDate: '2026-09-28' })
+  const depState = async (waiterSprintId?: string | null) => {
+    const all = [...await sprints.listForTeam(pTeam.id), ...await sprints.listForTeam(qTeam.id)]
+    const ix = buildIndex(await statuses.list(), [], [])
+    return dependencyState(await db.tasks.get(api.id), await db.tasks.get(ui.id),
+      new Map(all.map((s) => [s.id, s])), ix.doneIds, waiterSprintId)
+  }
+  check('work in no sprint reads as not scheduled', (await depState()) === 'unscheduled')
+  await tasks.setSprint(api.id, qS1.id)
+  await tasks.setSprint(ui.id, pS2.id)
+  check("the other team's earlier sprint lands first", (await depState()) === 'ahead', await depState())
+  check('the same weeks are tight', (await depState(pNext.id)) === 'tight', await depState(pNext.id))
+  await tasks.setSprint(api.id, qS2.id)
+  check('finishing after the waiting sprint ends is late', (await depState(pNext.id)) === 'late', await depState(pNext.id))
+  await tasks.move(api.id, pDone.id, null)
+  check('finished work is done whichever sprint it sits in', (await depState(pNext.id)) === 'done')
+  check('the worst state wins', worstState(['ahead', 'late', 'done']) === 'late')
+  check('and no dependencies means no state', worstState([]) === null)
+
+  await tasks.remove(api.id)
+  check('deleting a task takes its dependencies with it', (await links.forTask(ui.id)).waitsOn.length === 0)
+
+  // ---------- retros that remember ----------
+  console.log('\n  -- retros --')
+
+  const r1 = await notes.retroFor(pTeam.id, (await sprints.get(pPast.id))!)
+  check('a sprint gets a retro named after it',
+    r1.title === `${pPast.name} retrospective` && r1.sprintId === pPast.id && r1.type === 'retro')
+  check('asking again finds the same one',
+    (await notes.retroFor(pTeam.id, (await sprints.get(pPast.id))!)).id === r1.id)
+
+  const act1 = await notes.convert(r1.id, 'Pair on reviews', 'task', { teamId: pTeam.id, statusId: pTodo.id })
+  const act2 = await notes.convert(r1.id, 'Ask ops about staging', 'followUp', {})
+  const act3 = await notes.convert(r1.id, 'Book the demo room', 'followUp', {})
+  await tasks.move(act1.id!, pDone.id, null)
+  await followUps.remove(act3.id!)
+
+  const r2 = await notes.retroFor(pTeam.id, (await sprints.get(pNext.id))!)
+  await db.notes.update(r1.id, { createdAt: r2.createdAt - 60_000 })
+  const theirs = await notes.create({ type: 'retro', teamId: qTeam.id, title: 'Their retro' })
+  await db.notes.update(theirs.id, { createdAt: r2.createdAt - 30_000 })
+
+  check('a new retro finds the one before it', (await notes.previousRetro(r2))?.id === r1.id)
+  check("another team's retro is never this team's last one",
+    (await notes.previousRetro(r2))?.id !== theirs.id)
+  check('the first retro has nothing before it',
+    (await notes.previousRetro((await notes.get(r1.id))!)) === null)
+
+  const outcomes = actionOutcomes(
+    await notes.conversionsFor(r1.id), await db.tasks.toArray(), await db.followUps.toArray(),
+    buildIndex(await statuses.list(), [], []).doneIds,
+  )
+  check('every action is accounted for', outcomes.length === 3, String(outcomes.length))
+  check('open ones come first', outcomes[0].targetId === act2.id && !outcomes[0].done)
+  check('a finished task counts as done', outcomes.some((o) => o.targetId === act1.id && o.done))
+  check('a deleted follow-up is gone, not done', outcomes.some((o) => o.targetId === act3.id && o.gone && !o.done))
+
+  // ---------- personal KPIs ----------
+  console.log('\n  -- kpis --')
+
+  const kTeam = await teams.create({ name: 'KPI Team' })
+  const kim = await people.create({ name: 'Kim Measured', teamIds: [kTeam.id] })
+  const lee = await people.create({ name: 'Lee Reviewer', teamIds: [kTeam.id] })
+  const newcomer = await people.create({ name: 'Nia Newcomer', teamIds: [kTeam.id] })
+  // Both were here long before these sprints; the newcomer joined after them.
+  const longAgo = new Date('2026-01-01T09:00:00').getTime()
+  await db.people.update(kim.id, { createdAt: longAgo })
+  await db.people.update(lee.id, { createdAt: longAgo })
+  const kimP = (await people.get(kim.id))!
+  const leeP = (await people.get(lee.id))!
+  const DAY = 86_400_000
+
+  const k1 = await sprints.plan({ teamId: kTeam.id, lengthDays: 14, startDate: '2026-03-02' })
+  await sprints.activate(k1.id)
+  const kA = await tasks.create({ teamId: kTeam.id, statusId: pTodo.id, title: 'Sized', size: 5, assigneeId: kim.id, reviewerId: lee.id })
+  const kB = await tasks.create({ teamId: kTeam.id, statusId: pTodo.id, title: 'Unsized', assigneeId: kim.id })
+  const kC = await tasks.create({ teamId: kTeam.id, statusId: pTodo.id, title: 'Unfinished', size: 3, assigneeId: kim.id })
+  for (const t of [kA, kB, kC]) { await tasks.setSprint(t.id, k1.id); await tasks.move(t.id, pProg.id, null) }
+  await tasks.move(kA.id, pDone.id, null)
+  await tasks.move(kB.id, pDone.id, null)
+  // Two and four days in progress, so cycle time has something to take the median of.
+  for (const [t, days] of [[kA, 2], [kB, 4]] as const) {
+    const h = await tasks.history(t.id)
+    const started = h.find((e) => e.toStatusId === pProg.id)!
+    const finished = h.find((e) => e.toStatusId === pDone.id)!
+    await db.statusEvents.update(started.id, { at: finished.at - days * DAY })
+  }
+  await sprints.close(k1.id, null, [kC.id])
+
+  const k2 = await sprints.plan({ teamId: kTeam.id, lengthDays: 14, startDate: '2026-03-16' })
+  await sprints.activate(k2.id)
+  await tasks.setSprint(kC.id, k2.id)
+  await sprints.close(k2.id, null, [kC.id])
+
+  const k3 = await sprints.plan({ teamId: kTeam.id, lengthDays: 14, startDate: '2026-03-30' })
+  await availability.set(kim.id, k3.id, 0)
+  await sprints.activate(k3.id)
+  await sprints.close(k3.id, null, [])
+
+  const boardHistory = async () => ({
+    sprints: await db.sprints.toArray(),
+    tasks: await db.tasks.toArray(),
+    statusEvents: await db.statusEvents.toArray(),
+    statuses: await statuses.list(),
+    availability: await db.availability.toArray(),
+  })
+  let hist = await boardHistory()
+
+  const kimPoints = boardSeries('points', kimP, hist)
+  check('points count what they finished inside each sprint, unsized as one',
+    kimPoints.map((p) => p.value).join() === '6,0', kimPoints.map((p) => `${p.label}=${p.value}`).join(' '))
+  check('a sprint they were in and finished nothing in is a real zero', kimPoints[1]?.label === k2.name)
+  check('a sprint they were out for entirely is skipped', !kimPoints.some((p) => p.label === k3.name))
+  check("other teams' sprints are not theirs", kimPoints.length === 2)
+  const teamVelocity = velocity([(await sprints.get(k1.id))!], hist.tasks.filter((t) => t.teamId === kTeam.id), hist.statusEvents, hist.statuses)
+  check('their points are the same rule as team velocity', teamVelocity[0].points === kimPoints[0].value,
+    `${teamVelocity[0].points} vs ${kimPoints[0].value}`)
+  check('tasks finished per sprint', boardSeries('tasks', kimP, hist).map((p) => p.value).join() === '2,0')
+  check('reviews count work they reviewed, not work they own',
+    boardSeries('reviewed', leeP, hist).map((p) => p.value).join() === '1,0,0')
+  const kimCycle = boardSeries('cycleTime', kimP, hist)
+  check('cycle time is the median, and only for sprints that finished something',
+    kimCycle.length === 1 && kimCycle[0].value === 3, JSON.stringify(kimCycle))
+  check('someone who joined after the sprints has no history yet',
+    boardSeries('points', (await people.get(newcomer.id))!, hist).length === 0)
+
+  const ptsKpi = await kpis.add({ personId: kim.id, source: 'points' })
+  check('a board KPI takes its name and unit from its source',
+    ptsKpi.ok && ptsKpi.kpi!.name === 'Points delivered per sprint' && ptsKpi.kpi!.unit === 'pts' && ptsKpi.kpi!.better === 'higher')
+  check('the same board KPI twice is refused', !(await kpis.add({ personId: kim.id, source: 'points' })).ok)
+  check('a hand-tracked KPI needs a name', !(await kpis.add({ personId: kim.id, name: '  ' })).ok)
+  const turn = await kpis.add({ personId: kim.id, name: 'Review turnaround', unit: 'h', better: 'lower', target: 8 })
+  check('a hand-tracked KPI with a target', turn.ok && turn.kpi!.target === 8)
+  check('names are unique per person, whatever the case',
+    !(await kpis.add({ personId: kim.id, name: 'review TURNAROUND' })).ok)
+  check('but another person can have the same one',
+    (await kpis.add({ personId: lee.id, name: 'Review turnaround' })).ok)
+
+  check('a board KPI refuses readings typed in', !(await kpis.record(ptsKpi.kpi!.id, '2026-03-01', 4)).ok)
+  check('a reading needs a number', !(await kpis.record(turn.kpi!.id, '2026-03-01', Number.NaN)).ok)
+  check('and a date', !(await kpis.record(turn.kpi!.id, 'last week', 5)).ok)
+  await kpis.record(turn.kpi!.id, '2026-03-08', 9)
+  await kpis.record(turn.kpi!.id, '2026-03-01', 12, 'before pairing')
+  await kpis.record(turn.kpi!.id, '2026-03-08', 7, '  after pairing ')
+  const turnEntries = await kpis.entriesFor([turn.kpi!.id])
+  check('the same date again corrects it rather than duplicating', turnEntries.length === 2)
+
+  const kimKpis = await kpis.forPerson(kim.id)
+  const readings = kimKpis.map((k) => readKpi(k, turnEntries, kimP, hist))
+  const turnR = readings.find((r) => r.kpi.id === turn.kpi!.id)!
+  check('readings sort by date, not by when they were typed',
+    turnR.series.map((p) => p.value).join() === '12,7', turnR.series.map((p) => p.value).join())
+  check('the latest reading carries its trimmed note', turnR.latest?.note === 'after pairing')
+  check('lower-is-better under target is met', turnR.status === 'met')
+  check('and falling is an improvement', turnR.delta === -5 && turnR.improved === true)
+  const ptsR = readings.find((r) => r.kpi.id === ptsKpi.kpi!.id)!
+  check('no target means no verdict', ptsR.status === 'none')
+  check('a KPI without a target is tracked but not judged',
+    JSON.stringify(kpiSummary(readings)) === JSON.stringify({ tracked: 2, judged: 1, met: 1, missed: 0 }),
+    JSON.stringify(kpiSummary(readings)))
+
+  await kpis.update(ptsKpi.kpi!.id, { target: 5 })
+  const ptsR2 = readKpi((await kpis.get(ptsKpi.kpi!.id))!, [], kimP, hist)
+  check('higher-is-better under target is missed', ptsR2.status === 'missed' && ptsR2.improved === false)
+  check('a target can be cleared', (await kpis.update(ptsKpi.kpi!.id, { target: null })).ok
+    && (await kpis.get(ptsKpi.kpi!.id))!.target === null)
+  check('a KPI cannot be renamed to nothing', !(await kpis.update(ptsKpi.kpi!.id, { name: ' ' })).ok)
+  check('exactly on target counts as met', kpiStatus({ target: 8, better: 'lower' }, 8) === 'met'
+    && kpiStatus({ target: 8, better: 'higher' }, 8) === 'met')
+
+  await kpis.setArchived(ptsKpi.kpi!.id, true)
+  const afterRetire = (await kpis.forPerson(kim.id)).map((k) => readKpi(k, turnEntries, kimP, hist))
+  check('a retired KPI drops out of the summary', kpiSummary(afterRetire).tracked === 1)
+  check('and its source can be taken up again', (await kpis.add({ personId: kim.id, source: 'points' })).ok)
+
+  const snapK = await backup.snapshot()
+  check('backups carry KPIs and their readings', snapK.tables.kpis.length === 4 && snapK.tables.kpiEntries.length === 2,
+    `${snapK.tables.kpis.length} / ${snapK.tables.kpiEntries.length}`)
+  await kpis.remove(turn.kpi!.id)
+  check('deleting a KPI takes its readings with it', (await kpis.entriesFor([turn.kpi!.id])).length === 0)
+  check('a backup from before KPIs restores with none', (await backup.restore({ ...snapK, schemaVersion: 3, tables: { ...snapK.tables, kpis: undefined, kpiEntries: undefined } } as never)).ok
+    && (await db.kpis.count()) === 0)
+  await backup.restore(snapK)
+  check('and a new one brings them back', (await db.kpis.count()) === 4 && (await db.kpiEntries.count()) === 2)
+
+  check('percentages sit on the number', formatKpiValue(90, '%') === '90%')
+  check('other units get a space', formatKpiValue(6, 'h') === '6 h' && formatKpiValue(3, '') === '3')
+  check('and one of something is singular', formatKpiValue(1, 'tasks') === '1 task'
+    && formatKpiValue(-1, 'days') === '-1 day' && formatKpiValue(2, 'tasks') === '2 tasks' && formatKpiValue(1, 'h') === '1 h')
 
   console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} FAILED`)
   process.exit(failures === 0 ? 0 : 1)

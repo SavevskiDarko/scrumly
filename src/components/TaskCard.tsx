@@ -1,14 +1,16 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core'
 import { useRef } from 'react'
 import type { Blocker, Person, Status, Task } from '../db/types'
+import type { DepInfo } from '../hooks/useDependencies'
 import { blockedDays, daysInStatus, isStuck } from '../repo'
 import { Avatar } from './Avatar'
+import { DepChip } from './DepChip'
 
 export function TaskFace({
-  task, owner, assignee, status, blocker,
+  task, owner, assignee, status, blocker, dep,
 }: {
   task: Task; owner?: Person | null; assignee?: Person | null
-  status?: Status; blocker?: Blocker | null
+  status?: Status; blocker?: Blocker | null; dep?: DepInfo | null
 }) {
   const days = daysInStatus(task)
   const stuck = isStuck(task, status?.stuckAfterDays ?? null)
@@ -18,6 +20,7 @@ export function TaskFace({
       <div className="task-top">
         <span className="task-key">{task.key}</span>
         <span className="spacer" />
+        {!status?.isDone && <DepChip info={dep ?? null} />}
         {blocker && <span className="chip warn" style={{ padding: '0 7px' }}>Blocked {blockedDays(blocker)}d</span>}
         {!blocker && task.size != null && <span className="age">{task.size}p</span>}
       </div>
@@ -40,6 +43,7 @@ export function TaskCard(props: {
   assignee?: Person | null
   status?: Status
   blocker?: Blocker | null
+  dep?: DepInfo | null
   /** False on the person-grouped board, where drops belong to the cell rather than the card. */
   orderable?: boolean
   onOpen: (id: string) => void

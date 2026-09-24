@@ -4,7 +4,10 @@ import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
 import { useAutoSaveApi } from '../components/AutoSaveProvider'
 import { LIVE_FILE, fileStore } from '../repo/fileStore'
-import { backup, people as peopleRepo, saveTextFile, settings as settingsRepo, statuses as statusRepo, teams as teamRepo } from '../repo'
+import {
+  backup, people as peopleRepo, saveTextFile, settings as settingsRepo, statuses as statusRepo,
+  teams as teamRepo, todayISO,
+} from '../repo'
 
 /** Indexed to match JavaScript's getDay(), which Sunday starts. */
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -23,6 +26,7 @@ export function Settings() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [newStatus, setNewStatus] = useState('')
   const [newTeam, setNewTeam] = useState('')
+  const [newHoliday, setNewHoliday] = useState('')
   const [dump, setDump] = useState<string | null>(null)
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>(
     () => (document.documentElement.getAttribute('data-theme') as 'light' | 'dark' | null) ?? 'system',
@@ -49,6 +53,11 @@ export function Settings() {
   }, [], {} as Record<string, { tasks: number; members: number; sprints: number }>)
 
   const team = teams.find((t) => t.id === cfg?.activeTeamId) ?? teams[0]
+  // Past holidays still count — they are what keeps old sprints' capacity
+  // honest — but nobody needs to see last year's list every time.
+  const holidays = cfg?.holidays ?? []
+  const upcoming = holidays.filter((d) => d >= todayISO())
+  const pastHolidays = holidays.length - upcoming.length
 
   async function doExport() {
     const snap = await backup.snapshot()
@@ -190,6 +199,32 @@ export function Settings() {
             Used when you plan a sprint with no dates set. Sprints after the first start three days after the
             previous one ends, so this only decides where the very first one lands. Changing it leaves sprints
             that already exist alone.
+          </p>
+
+          <div className="field" style={{ marginTop: 16 }}>
+            <span className="label">Holidays</span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              {upcoming.map((d) => (
+                <span key={d} className="chip">
+                  {new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                  <button className="chip-x" title="Remove" onClick={() => void settingsRepo.removeHoliday(d)}>×</button>
+                </span>
+              ))}
+              {upcoming.length === 0 && <span className="small faint">None coming up.</span>}
+              {pastHolidays > 0 && <span className="small faint">and {pastHolidays} past</span>}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+              <input className="input" type="date" style={{ width: 160 }} value={newHoliday}
+                onChange={(e) => setNewHoliday(e.target.value)} />
+              <button className="btn" disabled={!newHoliday} onClick={async () => {
+                await settingsRepo.addHoliday(newHoliday)
+                setNewHoliday('')
+              }}>Add holiday</button>
+            </div>
+          </div>
+          <p className="small faint" style={{ marginTop: 10, marginBottom: 0 }}>
+            Days nobody works. They come out of every sprint's working days, so the burndown does not expect work on
+            them and sprint planning does not count them as capacity. Individual leave goes on the planning screen instead.
           </p>
         </div>
 

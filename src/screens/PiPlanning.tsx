@@ -3,10 +3,11 @@ import { useState } from 'react'
 import { Avatar } from '../components/Avatar'
 import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
-import type { ID, PiObjective, PiRisk, PiVote, RoamStatus, Sprint } from '../db/types'
+import type { ID, PiObjective, PiRisk, PiVote, RoamStatus, Sprint, Status, Task, TaskLink } from '../db/types'
+import { setParam } from '../hooks/useRoute'
 import {
-  pi as repo, piObjectives, piRisks, piVotes,
-  settings as settingsRepo, sprints as sprintRepo,
+  DEPENDENCY_HINT, DEPENDENCY_LABEL, dependencyState, links as linkRepo, pi as repo, piObjectives, piRisks,
+  piVotes, settings as settingsRepo, sprints as sprintRepo, type DependencyState,
 } from '../repo'
 
 const ROAM_LABEL: Record<RoamStatus, string> = {
@@ -19,6 +20,9 @@ const ROAM_CLASS: Record<RoamStatus, string> = {
 function overlaps(sprint: Sprint, startDate: string, endDate: string): boolean {
   return sprint.startDate <= endDate && sprint.endDate >= startDate
 }
+
+/** Worst first, so the list reads as a to-do rather than an inventory. */
+const DEP_ORDER: DependencyState[] = ['late', 'unscheduled', 'tight', 'ahead', 'done']
 
 function NewPi({
   teams, onClose, onCreated,
@@ -102,9 +106,41 @@ export function PiPlanning() {
     [currentTeamIds.join(',')], [] as Sprint[],
   )
 
+  const allLinks = useLiveQuery(() => linkRepo.all(), [], [] as TaskLink[])
+  const piTasks = useLiveQuery(
+    () => (currentTeamIds.length ? db.tasks.where('teamId').anyOf(currentTeamIds).toArray() : Promise.resolve([] as Task[])),
+    [currentTeamIds.join(',')], [] as Task[],
+  )
+  const statuses = useLiveQuery(() => db.statuses.toArray(), [], [] as Status[])
+
   const teamById = new Map(teams.map((t) => [t.id, t]))
   const personById = new Map(people.map((p) => [p.id, p]))
   const piTeams = currentTeamIds.map((id) => teamById.get(id)).filter((t): t is NonNullable<typeof t> => !!t)
+
+  // The red strings on a physical program board: one team's work waiting on
+  // another's. Same-team dependencies are the team's own business and stay
+  // off this view; ones whose waiting task is finished no longer matter.
+  const piTaskById = new Map(piTasks.map((t) => [t.id, t]))
+  const doneIds = new Set(statuses.filter((s) => s.isDone).map((s) => s.id))
+  const sprintById = new Map(teamSprints.map((s) => [s.id, s]))
+  const crossDeps = allLinks
+    .flatMap((link) => {
+      const from = piTaskById.get(link.fromTaskId)
+      const to = piTaskById.get(link.toTaskId)
+      if (!from || !to || from.teamId === to.teamId || doneIds.has(to.statusId)) return []
+      return [{ link, from, to, state: dependencyState(from, to, sprintById, doneIds) }]
+    })
+    .sort((a, b) => DEP_ORDER.indexOf(a.state) - DEP_ORDER.indexOf(b.state))
+  const atRisk = crossDeps.filter((d) => d.state === 'late' || d.state === 'unscheduled').length
+
+  const depEnd = (t: Task) => (
+    <button className="pi-dep-end" onClick={() => setParam('task', t.id)}>
+      <span className="small faint">
+        {teamById.get(t.teamId)?.name ?? 'Another team'} · {(t.sprintId && sprintById.get(t.sprintId)?.name) || 'no sprint'}
+      </span>
+      <span className="pi-dep-title"><span className="task-key">{t.key}</span> {t.title}</span>
+    </button>
+  )
 
   async function save(id: string, patch: Parameters<typeof repo.update>[1]) {
     const r = await repo.update(id, patch)
@@ -231,6 +267,44 @@ export function PiPlanning() {
                     )
                   })}
                 </div>
+              )}
+            </div>
+
+            <div className="panel">
+              <p className="panel-title">
+                Cross-team dependencies
+                <span className="spacer" />
+                {crossDeps.length > 0 && (
+                  <span className="faint" style={{ fontWeight: 400, color: atRisk ? 'var(--alert)' : undefined }}>
+                    {crossDeps.length} open · {atRisk} at risk
+                  </span>
+                )}
+              </p>
+              {crossDeps.length === 0 ? (
+                <p className="muted small" style={{ margin: 0 }}>
+                  None between these teams yet. Link tasks from their detail panel with “Waits on…” and they appear here,
+                  with whether each one is scheduled to land in time.
+                </p>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {crossDeps.map(({ link, from, to, state }) => (
+                      <div key={link.id} className="pi-dep">
+                        {depEnd(from)}
+                        <span className="faint" aria-label="is needed by">→</span>
+                        {depEnd(to)}
+                        <span className={`chip${state === 'late' || state === 'unscheduled' ? ' warn' : state === 'done' ? ' solid' : ''}`}
+                          title={DEPENDENCY_HINT[state]}>
+                          {DEPENDENCY_LABEL[state]}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="small faint" style={{ marginTop: 10, marginBottom: 0 }}>
+                    The right-hand task waits on the left. Compared by sprint dates, since each team's sprints are its own:
+                    late means it is scheduled to finish after the sprint that needs it has ended.
+                  </p>
+                </>
               )}
             </div>
 

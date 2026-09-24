@@ -3,8 +3,9 @@ import { useState } from 'react'
 import { Avatar } from '../components/Avatar'
 import { db } from '../db/schema'
 import type { Person, Status, Task } from '../db/types'
+import { useKpiReadings } from '../hooks/useKpis'
 import { setParam } from '../hooks/useRoute'
-import { people as peopleRepo } from '../repo'
+import { kpiSummary, people as peopleRepo } from '../repo'
 
 const ROLES = ['Developer', 'QA', 'Tech lead', 'Designer', 'Product owner', 'Other']
 
@@ -44,6 +45,7 @@ export function People({ teamId }: { teamId: string }) {
     .filter((p) => scope === 'all' || p.teamIds.includes(teamId))
   const statusById = new Map(statuses.map((s) => [s.id, s]))
   const activeStatusIds = new Set(statuses.filter((s) => s.countsAsActive).map((s) => s.id))
+  const kpiReadings = useKpiReadings(list)
 
   function workFor(p: Person): { active: Task[]; all: Task[] } {
     const mine = tasks.filter((t) => t.assigneeId === p.id || t.reviewerId === p.id || t.testerId === p.id)
@@ -105,18 +107,20 @@ export function People({ teamId }: { teamId: string }) {
               <span style={{ width: 180 }}>Person</span>
               <span style={{ flex: 1 }}>Working on</span>
               <span style={{ width: 120 }}>Load</span>
+              <span style={{ width: 130 }}>KPIs</span>
               {teams.length > 1 && <span style={{ width: 150 }}>Teams</span>}
               <span style={{ width: 70 }} />
             </div>
             {list.map((p) => {
               const { active } = workFor(p)
               const share = Math.round((active.length / busiest) * 100)
+              const kpi = kpiSummary(kpiReadings.get(p.id) ?? [])
               return (
                 <div key={p.id} className="row">
                   <div style={{ width: 180, display: 'flex', gap: 10, alignItems: 'center' }}>
                     <Avatar person={p} size={30} dim={!p.active} />
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 600 }}>{p.name}</div>
+                      <button className="linkish" onClick={() => setParam('member', p.id)}>{p.name}</button>
                       <div className="small faint">{p.role}{!p.active && ' · inactive'}</div>
                     </div>
                   </div>
@@ -139,6 +143,22 @@ export function People({ teamId }: { teamId: string }) {
                   <div style={{ width: 120 }}>
                     <div className="bar"><i className={share > 80 ? 'hot' : ''} style={{ width: `${share}%` }} /></div>
                     <div className="small faint" style={{ marginTop: 4 }}>{active.length} active</div>
+                  </div>
+
+                  <div style={{ width: 130 }}>
+                    {kpi.tracked === 0 ? (
+                      <button className="btn ghost sm" onClick={() => setParam('member', p.id)}>Add KPIs</button>
+                    ) : (
+                      <button
+                        className={`chip btn-like${kpi.missed ? ' warn' : kpi.judged && kpi.met === kpi.judged ? ' ok' : ''}`}
+                        title={kpi.tracked > kpi.judged
+                          ? `${kpi.tracked - kpi.judged} of ${kpi.tracked} not judged yet — no target, or no reading`
+                          : undefined}
+                        onClick={() => setParam('member', p.id)}
+                      >
+                        {kpi.judged ? `${kpi.met} of ${kpi.judged} on target` : `${kpi.tracked} tracked`}
+                      </button>
+                    )}
                   </div>
 
                   {teams.length > 1 && (

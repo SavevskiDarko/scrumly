@@ -9,6 +9,7 @@ import { db } from './db/schema'
 import { useRoute } from './hooks/useRoute'
 import { CommandPalette } from './components/CommandPalette'
 import { PasteTasks } from './components/PasteTasks'
+import { PersonDrawer } from './components/PersonDrawer'
 import { Blockers } from './screens/Blockers'
 import { Boards } from './screens/Boards'
 import { Notes } from './screens/Notes'
@@ -17,6 +18,7 @@ import { Board } from './screens/Board'
 import { FirstRun } from './screens/FirstRun'
 import { People } from './screens/People'
 import { PiPlanning } from './screens/PiPlanning'
+import { Planning } from './screens/Planning'
 import { Settings } from './screens/Settings'
 import { Standup } from './screens/Standup'
 
@@ -63,6 +65,8 @@ function Inner() {
 
   const team = teams.find((t) => t.id === cfg.activeTeamId) ?? teams[0]
   const taskId = route.params.get('task')
+  // Not 'person': the board already uses that to filter to one person's cards.
+  const memberId = route.params.get('member')
 
   let screen: React.ReactNode
   if (route.screen === 'board') screen = <Board teamId={team.id} />
@@ -72,6 +76,7 @@ function Inner() {
   else if (route.screen === 'boards') screen = <Boards />
   else if (route.screen === 'notes') screen = <Notes teamId={team.id} />
   else if (route.screen === 'sprints') screen = <Sprints teamId={team.id} />
+  else if (route.screen === 'planning') screen = <Planning teamId={team.id} />
   else if (route.screen === 'pi') screen = <PiPlanning />
   else if (route.screen === 'canvas') {
     const boardId = route.params.get('board')
@@ -89,6 +94,7 @@ function Inner() {
   return (
     <>
       <Shell>{screen}</Shell>
+      {memberId && <PersonDrawer personId={memberId} />}
       {taskId && <TaskDrawer taskId={taskId} />}
       {palette && <CommandPalette teamId={team.id} onClose={() => setPalette(false)} onPaste={() => setPaste(true)} />}
       {paste && <PasteTasks teamId={team.id} onClose={() => setPaste(false)} />}

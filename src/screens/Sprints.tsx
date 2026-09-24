@@ -4,9 +4,9 @@ import { Avatar } from '../components/Avatar'
 import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
 import type { Sprint } from '../db/types'
-import { setParam } from '../hooks/useRoute'
+import { go, setParam } from '../hooks/useRoute'
 import {
-  blockers as blockerRepo, buildIndex, daysInStatus, flowStats, isStuckTask,
+  blockers as blockerRepo, buildIndex, daysInStatus, flowStats, isStuckTask, notes as notesRepo,
   settings as settingsRepo, sprints as repo, sprintStats, todayISO, velocity, workingDays,
 } from '../repo'
 
@@ -44,8 +44,9 @@ export function Sprints({ teamId }: { teamId: string }) {
   const openBlockers = useLiveQuery(() => blockerRepo.listOpen(), [], [])
 
   const ix = buildIndex(statuses, people, openBlockers)
+  const holidays = cfg?.holidays ?? []
   const active = list.find((s) => s.state === 'active') ?? null
-  const stats = active ? sprintStats(active, tasks, statusEvents, sprintEvents, statuses) : null
+  const stats = active ? sprintStats(active, tasks, statusEvents, sprintEvents, statuses, { holidays }) : null
 
   // Last six closed sprints, oldest first, so the bars read left to right.
   const past = velocity(list.filter((s) => s.state === 'closed'), tasks, statusEvents, statuses).slice(-6)
@@ -90,6 +91,12 @@ export function Sprints({ teamId }: { teamId: string }) {
     toast(`${s.name} planned for ${s.startDate}`)
   }
 
+  /** Finds the sprint's retro, or starts it, and opens it. */
+  async function openRetro(s: Sprint) {
+    const note = await notesRepo.retroFor(teamId, s)
+    go('notes', { note: note.id })
+  }
+
   return (
     <>
       <div className="topbar">
@@ -97,6 +104,7 @@ export function Sprints({ teamId }: { teamId: string }) {
         {active && <span className="chip on">{active.name}</span>}
         <span className="spacer" />
         <button className="btn" onClick={planNext}>Plan another</button>
+        {active && <button className="btn" onClick={() => void openRetro(active)}>Retro</button>}
         {active && <button className="btn primary" onClick={() => setClosing(active)}>Close {active.name}</button>}
       </div>
 
@@ -104,8 +112,8 @@ export function Sprints({ teamId }: { teamId: string }) {
         {!active ? (
           <div className="empty">
             <strong>No sprint running</strong>
-            Plan one, then activate it. Tasks join a sprint from their detail panel, and every join is logged so the
-            chart can tell what was committed up front from what turned up on day six.
+            Plan one, pull work into it on Sprint planning, then start it. Every join is logged so the chart can tell
+            what was committed up front from what turned up on day six.
           </div>
         ) : (
           <>
@@ -295,8 +303,14 @@ export function Sprints({ teamId }: { teamId: string }) {
                 <input className="input" type="date" style={{ width: 138 }} value={s.endDate}
                   onChange={(e) => void save(s.id, { endDate: e.target.value })} />
                 <span className="small faint" style={{ flex: 1 }}>
-                  {workingDays(s.startDate, s.endDate).length}d · {done} of {count} done
+                  {workingDays(s.startDate, s.endDate, holidays).length}d · {done} of {count} done
                 </span>
+                {s.state !== 'closed' && (
+                  <button className="btn ghost sm" onClick={() => go('planning', { sprint: s.id })}>Plan</button>
+                )}
+                {s.state !== 'planned' && (
+                  <button className="btn ghost sm" onClick={() => void openRetro(s)}>Retro</button>
+                )}
                 {s.state === 'planned' && (
                   <button className="btn sm" onClick={async () => {
                     const r = await repo.activate(s.id)

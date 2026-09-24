@@ -11,6 +11,8 @@ export interface Settings {
   schemaVersion: number
   lastBackupAt: number | null
   setupComplete: boolean
+  /** ISO dates nobody works — public holidays, company days off. Read by every working-day count. */
+  holidays: string[]
 }
 
 export interface Team {
@@ -174,5 +176,38 @@ export interface PiVote {
   piId: ID
   teamId: ID
   vote: number
+  at: number
+}
+
+/**
+ * Where a KPI's numbers come from. 'manual' is typed in at each check-in; the
+ * rest are replayed from the task history, one reading per closed sprint, so
+ * nobody copies across a number the app already has.
+ */
+export type KpiSource = 'manual' | 'points' | 'tasks' | 'reviewed' | 'cycleTime'
+
+/** Something one person has agreed to be measured on. */
+export interface Kpi {
+  id: ID
+  personId: ID
+  name: string
+  source: KpiSource
+  unit: string
+  /** Null means watched without a line to hit. */
+  target: number | null
+  /** Which side of the target is good: review turnaround wants lower, coverage higher. */
+  better: 'higher' | 'lower'
+  createdAt: number
+  /** Retired rather than deleted, so last quarter's goals still have their history. */
+  archivedAt: number | null
+}
+
+/** One reading of a hand-tracked KPI. At most one per KPI per date. */
+export interface KpiEntry {
+  id: ID
+  kpiId: ID
+  date: string
+  value: number
+  note: string
   at: number
 }
