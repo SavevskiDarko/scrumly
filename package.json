@@ -1,7 +1,7 @@
 {
   "name": "scrumly",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "description": "A Scrum Master's working surface. Single user, local-first, no server.",
   "author": "Scrumly",
