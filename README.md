@@ -250,6 +250,28 @@ Without a Windows machine to build on, the Build desktop app workflow
 a GitHub Windows runner and attaches both files to a release. The icon is
 `build/icon.png`.
 
+### Updates
+
+Install `Scrumly-Setup-x.y.z.exe` once and it keeps itself up to date
+(`electron/updates.cjs`): each launch, and every six hours while it stays
+open, it asks GitHub for the release marked Latest, downloads anything
+newer in the background, and installs it when Scrumly closes — or right
+away, from the dialog that says it is ready. Help → Check for updates
+does the same on demand. The data is never touched; it does not live
+next to the exe. The portable exe does not update itself.
+
+What it reads is `latest.yml`, which the workflow attaches next to the
+installer. Only a `v*` tag makes a release Latest, so a build run by hand
+from the Actions tab is a test build that installed apps never see. To
+ship: bump the version, push, then push a `vX.Y.Z` tag.
+
+`electron-updater` is the only entry in `dependencies`, and that is on
+purpose. It is the one package the packaged main process `require()`s;
+everything else is bundled into `dist/` by Vite, so it sits in
+`devDependencies` where `electron-builder` leaves it out of the app.
+Moving a renderer library back into `dependencies` would ship it twice
+and add megabytes (Excalidraw alone is most of them).
+
 `electron-builder` is pinned to 25.x on purpose. 26.x `require()`s
 `@noble/hashes` v2, which is ESM-only, and `require()` of an ES module
 needs Node 22.12 or newer — on Node 20 packaging dies with

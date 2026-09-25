@@ -29,6 +29,7 @@ app.setName('Scrumly')
 
 const storage = require('./storage.cjs')
 const jira = require('./jira.cjs')
+const updates = require('./updates.cjs')
 
 const DIST = path.join(__dirname, '..', 'dist')
 const DEV_URL = process.env.SCRUMLY_DEV_URL || null
@@ -163,6 +164,12 @@ function buildMenu() {
         { role: 'togglefullscreen' },
       ],
     },
+    {
+      label: 'Help',
+      submenu: [
+        { label: 'Check for updates…', click: () => { void updates.checkNow() } },
+      ],
+    },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
@@ -220,6 +227,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc()
     buildMenu()
     createWindow()
+    updates.start({ getWindow: () => mainWindow, flushData: flushRenderer })
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

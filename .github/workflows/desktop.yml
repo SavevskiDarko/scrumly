@@ -1,6 +1,11 @@
 # Builds the Windows desktop app (installer and portable exe) on a Windows
 # runner and attaches both to a GitHub Release. Run it from the Actions tab
 # (Build desktop app -> Run workflow), or push a tag starting with v.
+#
+# The installed app updates itself from whichever release GitHub marks Latest
+# (electron/updates.cjs), reading the latest.yml attached next to the
+# installer. So only a v* tag makes a release Latest; a build run by hand is a
+# test build and never reaches installed apps.
 name: Build desktop app
 
 on:
@@ -32,12 +37,15 @@ jobs:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('desktop-{0}', github.run_number) }}
           name: Scrumly desktop ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}
           target_commitish: ${{ github.sha }}
-          make_latest: true
+          make_latest: ${{ github.ref_type == 'tag' }}
           body: |
             Windows desktop app built from ${{ github.sha }}.
 
-            - **Scrumly Setup *.exe** installs it (you can choose the folder).
-            - **Scrumly *.exe** (without Setup) is portable and runs without installing.
+            - **Scrumly-Setup-*.exe** installs it (you can choose the folder) and then keeps itself up to date.
+            - **Scrumly-*-portable.exe** runs without installing, and does not update itself.
 
             The exe is not code-signed, so Windows SmartScreen may warn the first time: choose More info -> Run anyway.
-          files: dist-app/*.exe
+          files: |
+            dist-app/*.exe
+            dist-app/*.exe.blockmap
+            dist-app/latest.yml
