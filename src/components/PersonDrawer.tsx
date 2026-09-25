@@ -1,13 +1,13 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useCallback, useEffect, useState } from 'react'
 import { db } from '../db/schema'
-import type { ID, Kpi, KpiSource } from '../db/types'
+import type { ID, Kpi, KpiSource, Person } from '../db/types'
 import { useKpiReadings } from '../hooks/useKpis'
 import { go, setParam } from '../hooks/useRoute'
 import { formatDate } from '../lib/dates'
 import {
-  BOARD_SOURCES, KPI_SOURCES, KPI_TEMPLATES, formatKpiValue, kpiSummary, kpis as repo, notes as notesRepo,
-  todayISO, type KpiReading,
+  BOARD_SOURCES, KPI_SOURCES, KPI_TEMPLATES, ROLES, formatKpiValue, kpiSummary, kpis as repo, notes as notesRepo,
+  people as peopleRepo, todayISO, type KpiReading,
 } from '../repo'
 import { Avatar } from './Avatar'
 import { DateField } from './DateField'
@@ -281,6 +281,53 @@ function AddKpi({ personId, taken, onDone }: { personId: ID; taken: Set<KpiSourc
   )
 }
 
+/**
+ * Name and role. For someone a Jira import added, these started as Jira's
+ * display name and "Developer"; a pull matches them by Jira id after that and
+ * leaves both alone, so what is set here stays.
+ */
+function EditPerson({ person, onDone }: { person: Person; onDone: () => void }) {
+  const [name, setName] = useState(person.name)
+  const [role, setRole] = useState(person.role)
+  // A role typed in from a pasted list is kept as an option rather than lost.
+  const roles = ROLES.includes(person.role) ? ROLES : [person.role, ...ROLES]
+
+  async function save() {
+    if (!name.trim()) return
+    await peopleRepo.update(person.id, { name: name.trim(), role })
+    onDone()
+  }
+
+  return (
+    <div className="panel">
+      <p className="panel-title">Name and role</p>
+      <div className="person-row">
+        <input
+          className="input" autoFocus placeholder="Name" value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void save()
+            // Leave the drawer open: Escape here only abandons the edit.
+            if (e.key === 'Escape') { e.stopPropagation(); onDone() }
+          }}
+        />
+        <select className="select" value={role} onChange={(e) => setRole(e.target.value)}>
+          {roles.map((r) => <option key={r}>{r}</option>)}
+        </select>
+      </div>
+      {person.jiraId && (
+        <p className="small faint" style={{ margin: '8px 0 0' }}>
+          Imported from Jira. Changes here stay — later pulls keep them.
+        </p>
+      )}
+      <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+        <button className="btn primary sm" disabled={!name.trim()} onClick={() => void save()}>Save</button>
+        <button className="btn ghost sm" onClick={onDone}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 export function PersonDrawer({ personId }: { personId: ID }) {
   const person = useLiveQuery(() => db.people.get(personId), [personId])
   const teams = useLiveQuery(() => db.teams.orderBy('name').toArray(), [], [])
@@ -288,6 +335,7 @@ export function PersonDrawer({ personId }: { personId: ID }) {
   const [adding, setAdding] = useState(false)
   const [openId, setOpenId] = useState<ID | null>(null)
   const [showRetired, setShowRetired] = useState(false)
+  const [editing, setEditing] = useState(false)
 
   const close = useCallback(() => setParam('member', null), [])
 
@@ -329,11 +377,14 @@ export function PersonDrawer({ personId }: { personId: ID }) {
             </div>
           </div>
           <span className="spacer" />
+          <button className="btn ghost sm" onClick={() => setEditing(true)} disabled={editing} title="Change name or role">Edit</button>
           <button className="btn ghost sm" onClick={() => void oneToOne()} title="Start a private one-to-one note">1:1 note</button>
           <button className="btn ghost sm" onClick={close}>Close</button>
         </div>
 
         <div className="drawer-body">
+          {editing && <EditPerson key={person.id} person={person} onDone={() => setEditing(false)} />}
+
           <div>
             <p className="panel-title">
               KPIs

@@ -2,6 +2,9 @@ import { db } from '../db/schema'
 import type { ID, Person } from '../db/types'
 import { hashSeed, initialsOf, newId } from './ids'
 
+/** The roles offered when adding or editing someone. A role is free text underneath. */
+export const ROLES = ['Developer', 'QA', 'Tech lead', 'Designer', 'Product owner', 'Other']
+
 export const people = {
   list: () => db.people.orderBy('name').toArray(),
   listActive: () => db.people.filter((p) => p.active).toArray(),

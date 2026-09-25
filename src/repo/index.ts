@@ -10,7 +10,7 @@ export type { BoardIndex, Bucket, FlowStats, Load, OwnerField, Queue } from './i
 export { followUps } from './followUps'
 export { standups, rotate, runningOrder } from './standups'
 export type { StandupSummary } from './standups'
-export { people } from './people'
+export { people, ROLES } from './people'
 export { teams } from './teams'
 export { statuses, DEFAULT_STATUSES } from './statuses'
 export { settings, DEFAULT_SETTINGS } from './settings'

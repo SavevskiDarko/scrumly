@@ -5,9 +5,7 @@ import { db } from '../db/schema'
 import type { Person, Status, Task } from '../db/types'
 import { useKpiReadings } from '../hooks/useKpis'
 import { setParam } from '../hooks/useRoute'
-import { kpiSummary, people as peopleRepo } from '../repo'
-
-const ROLES = ['Developer', 'QA', 'Tech lead', 'Designer', 'Product owner', 'Other']
+import { ROLES, kpiSummary, people as peopleRepo } from '../repo'
 
 function AddPerson({ teamId, onClose }: { teamId: string; onClose: () => void }) {
   const [name, setName] = useState('')

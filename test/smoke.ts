@@ -1333,6 +1333,15 @@ async function run() {
   check('and the move made here drops out of the history', (await tasks.history(aAfter.id)).length === 3)
   check('Scrumly-only fields survive a pull', aAfter.reviewerId === anaJ.id)
 
+  // Jira only suggests a name, and has no idea of a role.
+  await people.update(ben!.id, { name: 'Benjamin Builder', role: 'QA' })
+  await pullTeam(jTeam.id, fakeJira())
+  const benRenamed = (await people.get(ben!.id))!
+  check('a name and role changed here survive a pull', benRenamed.name === 'Benjamin Builder' && benRenamed.role === 'QA')
+  check('and they are still who Jira means, not a new person',
+    (await tasks.get(jt('PAY-2').id))!.assigneeId === ben!.id && !(await db.people.toArray()).some((p) => p.name === 'Ben Builder'))
+  await people.update(ben!.id, { name: 'Ben Builder', role: 'Developer' })
+
   await jiraLinks.mapStatus(jTeam.id, '10', colNamed('Code review').id)
   await pullTeam(jTeam.id, fakeJira())
   check('a status mapped by hand is its own column, and its own move',
