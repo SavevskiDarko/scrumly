@@ -13,7 +13,9 @@ import { fileStore, historyName, prunable } from '../src/repo/fileStore'
 import { formatDate, parseDateInput } from '../src/lib/dates'
 import { createRequire } from 'node:module'
 import type { JiraBridge } from '../src/desktop/bridge'
-import { jiraLinks, jiraTime, plainText, priorityFrom, type JiraIssue } from '../src/repo/jira'
+import {
+  autoColumn, jiraLinks, jiraTime, plainText, priorityFrom, type JiraBoardConfig, type JiraIssue, type JiraStatus,
+} from '../src/repo/jira'
 import { pullTeam } from '../src/jira/pull'
 import type { Task } from '../src/db/types'
 import { currentScope } from '../src/repo/localOnly'
@@ -1162,6 +1164,20 @@ async function run() {
   const anaJ = await people.create({ name: 'Ana Jira', teamIds: [jTeam.id] })
   const jCols = await statuses.list()
   const colNamed = (n: string) => jCols.find((c) => c.name === n)!
+
+  // On Hold, For Testing and the like: in progress to Jira, and nowhere to go
+  // here until a column of their own exists.
+  const onHold: JiraStatus = { id: '20', name: 'On Hold', statusCategory: { key: 'indeterminate' } }
+  const inTesting: JiraStatus = { id: '21', name: 'In Testing', statusCategory: { key: 'indeterminate' } }
+  const noBoard: JiraBoardConfig = {}
+  check('a status with no column of its own waits in In progress',
+    autoColumn(onHold, jCols, noBoard)?.id === colNamed('In progress').id
+    && autoColumn(inTesting, jCols, noBoard)?.id === colNamed('In progress').id)
+  const withHold = [...jCols, { ...colNamed('To do'), id: 'col-hold', name: 'On-hold', order: 99 }]
+  check('and goes to a column named like it once there is one, case and dashes aside',
+    autoColumn(onHold, withHold, noBoard)?.id === 'col-hold'
+    && autoColumn(inTesting, withHold, noBoard)?.id === colNamed('In progress').id)
+
   const t = (s: string) => `2026-03-${s}.000+0100`
   const change = (id: string, at: string, field: string, from: string | null, to: string | null) =>
     ({ id, created: t(at), items: [{ field, fieldId: field.toLowerCase(), from, to }] })

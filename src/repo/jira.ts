@@ -147,17 +147,23 @@ const splitIds = (v: string | null | undefined): string[] =>
 
 // ---------- statuses -> columns ----------
 
+/** A name as matching sees it: "On Hold", "on-hold" and "OnHold" are one column. */
+const nameKey = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+
 /**
  * Which Scrumly column a Jira status lands in when nobody has said. Same name
  * first, then the name of the board column the status sits under, then Jira's
  * own category: done to the first done column, in progress to the first
  * active one, and to do to the first column that is neither — skipping the
- * very first, which is the backlog.
+ * very first, which is the backlog. So adding an "On hold" column is all it
+ * takes to pull On Hold issues out of In progress.
  */
 export function autoColumn(status: JiraStatus | undefined, columns: Status[], config: JiraBoardConfig): Status | null {
   if (!columns.length) return null
-  const named = (name: string | undefined) =>
-    name ? columns.find((c) => c.name.trim().toLowerCase() === name.trim().toLowerCase()) : undefined
+  const named = (name: string | undefined) => {
+    const key = name ? nameKey(name) : ''
+    return key ? columns.find((c) => nameKey(c.name) === key) : undefined
+  }
   if (status) {
     const exact = named(status.name)
     if (exact) return exact

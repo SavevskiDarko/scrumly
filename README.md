@@ -491,9 +491,13 @@ desktop app.
 - **The history comes too.** Burndown, velocity, cycle time and board KPIs
   are replayed from `statusEvents` and `sprintEvents`, so each issue's
   changelog is replayed into them. Imported sprints chart like native ones
-- **Statuses land in columns** by name, then by the board column's name,
-  then by Jira's category (to do / in progress / done). Any of them can be
-  set by hand in Settings
+- **Statuses land in columns** by name (case, spaces and dashes aside, so
+  "On-hold" catches On Hold), then by the board column's name, then by
+  Jira's category (to do / in progress / done) — which is why On Hold,
+  For Testing and the like sit in In progress until a column of their own
+  exists. Any of them can be set by hand in Settings. Adding, renaming or
+  removing a column pulls again a few seconds later, so issues move
+  without waiting for the timer
 - **Assignees** are matched to people by Jira id, then by name; anyone new
   joins the team
 - **Pulls are cheap to repeat.** Rows get ids derived from Jira's, so two
