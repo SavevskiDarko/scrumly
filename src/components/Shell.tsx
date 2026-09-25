@@ -117,6 +117,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <div className="brand">
           <span className="brand-mark">S</span>
           <span className="brand-name">Scrumly</span>
+          <span className="brand-version" title={`Scrumly ${__APP_VERSION__}`}>v{__APP_VERSION__}</span>
         </div>
 
         <TeamSwitcher activeTeamId={activeTeamId} />

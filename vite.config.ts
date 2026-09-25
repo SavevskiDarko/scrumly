@@ -50,7 +50,11 @@ export default defineConfig(({ mode }) => {
     // file opened from disk can be neither installed nor served by a worker.
     publicDir: single ? false : 'public',
     plugins: [react(), ...(single ? [viteSingleFile()] : [serviceWorker()])],
-    define: { 'process.env.IS_PREACT': JSON.stringify('false') },
+    define: {
+      'process.env.IS_PREACT': JSON.stringify('false'),
+      // Shown beside the name, so the desktop app says which release it is.
+      __APP_VERSION__: JSON.stringify(JSON.parse(readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8')).version),
+    },
     resolve: {
       alias: single
         ? { '@excalidraw/mermaid-to-excalidraw': fileURLToPath(new URL('./stubs/mermaid-stub.ts', import.meta.url)) }
