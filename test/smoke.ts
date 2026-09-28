@@ -7,9 +7,10 @@ import {
   parseQuickAdd, people, queues, rotate, notes, settings, sprints, sprintStats,
   standups, statuses, tasks, teams, velocity, workingDays, addDays, nextWeekday, runningOrder,
   actionOutcomes, availability, capacityPlan, dependencyState, links, worstState,
-  kpis, boardSeries, readKpi, kpiStatus, kpiSummary, formatKpiValue,
+  kpis, boardSeries, readKpi, kpiStatus, kpiSummary, formatKpiValue, pi,
 } from '../src/repo'
 import { flowSkeleton, looksLikeFlow, parseFlow } from '../src/canvas/quickFlow'
+import { piIterations, programBoardSkeleton } from '../src/canvas/programBoard'
 import { fileStore, historyName, prunable } from '../src/repo/fileStore'
 import { formatDate, parseDateInput } from '../src/lib/dates'
 import { createRequire } from 'node:module'
@@ -258,6 +259,34 @@ async function run() {
   await boards.remove(board.id)
   check('deleting a board clears its links', (await db.boardLinks.count()) === 0)
   check('and the board itself', (await db.boards.count()) === 0)
+
+  // A PI's program board: iterations cut from its dates, a row per team, a locked grid.
+  const its = piIterations({ name: 'PI 3', startDate: '2026-10-05', endDate: '2026-12-11' }, 14)
+  check('a ten-week PI makes five two-week iterations', its.length === 5, String(its.length))
+  check('numbered after the PI', its[0].label === 'Iteration 3.1', its[0].label)
+  check('the last is the IP iteration', its[4].label === 'Iteration 3.5 (IP)', its[4].label)
+  check('each iteration follows the one before', its[1].startDate === '2026-10-19', its[1].startDate)
+  check('and the last runs to the end of the PI', its[4].endDate === '2026-12-11', its[4].endDate)
+  const unnumbered = piIterations({ name: 'Autumn', startDate: '2026-10-05', endDate: '2026-10-18' }, 14)
+  check('a PI without a number just counts', unnumbered.length === 1 && unnumbered[0].label === 'Iteration 1', unnumbered[0]?.label)
+
+  const pb = programBoardSkeleton({ title: 'PI 3', iterations: its, teams: ['Alpha', 'Beta'] }).elements
+  const labelled = (t: string) => pb.filter((e) => (e.label as { text?: string } | undefined)?.text === t)
+  const cells = pb.filter((e) => e.type === 'rectangle' && !e.label)
+  check('each team gets a row', labelled('Alpha').length === 1 && labelled('Beta').length === 1)
+  check('under a milestones row', labelled('Milestones / Events').length === 1)
+  check('with a cell under every iteration', cells.length === 3 * 5, String(cells.length))
+  check('the grid is locked', cells.every((e) => e.locked === true) && labelled('Alpha')[0].locked === true)
+  check('the key stickies are not, so they can be copied', labelled('Feature / Enabler')[0]?.locked === false)
+
+  const piRow = (await pi.create({ startDate: '2026-10-05', endDate: '2026-12-11', teamIds: [team.id] })).pi!
+  const piBoard = await boards.create('PI 1 program board')
+  await boards.link(piBoard.id, 'pi', piRow.id)
+  check('a PI finds its program board', (await boards.forEntity('pi', piRow.id))[0]?.id === piBoard.id)
+  await pi.remove(piRow.id)
+  check('deleting the PI drops the link', (await boards.linksFor(piBoard.id)).length === 0)
+  check('but keeps the board', Boolean(await boards.get(piBoard.id)))
+  await boards.remove(piBoard.id)
 
 
   // ---------- slice 5: notes and sprints ----------

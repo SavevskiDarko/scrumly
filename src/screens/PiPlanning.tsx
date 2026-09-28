@@ -3,11 +3,12 @@ import { useState } from 'react'
 import { Avatar } from '../components/Avatar'
 import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
-import type { ID, PiObjective, PiRisk, PiVote, RoamStatus, Sprint, Status, Task, TaskLink } from '../db/types'
-import { setParam } from '../hooks/useRoute'
+import type { Board, ID, PiObjective, PiRisk, PiVote, ProgramIncrement, RoamStatus, Sprint, Status, Task, TaskLink } from '../db/types'
+import { go, setParam } from '../hooks/useRoute'
+import { piIterations, programBoardSkeleton } from '../canvas/programBoard'
 import {
-  DEPENDENCY_HINT, DEPENDENCY_LABEL, dependencyState, links as linkRepo, pi as repo, piObjectives, piRisks,
-  piVotes, settings as settingsRepo, sprints as sprintRepo, type DependencyState,
+  boards as boardRepo, DEPENDENCY_HINT, DEPENDENCY_LABEL, dependencyState, links as linkRepo, pi as repo, piObjectives,
+  piRisks, piVotes, settings as settingsRepo, sprints as sprintRepo, type DependencyState,
 } from '../repo'
 
 const ROAM_LABEL: Record<RoamStatus, string> = {
@@ -83,6 +84,7 @@ export function PiPlanning() {
   const [objTitle, setObjTitle] = useState('')
   const [riskText, setRiskText] = useState('')
   const [riskOwner, setRiskOwner] = useState('')
+  const [drawing, setDrawing] = useState(false)
 
   const cfg = useLiveQuery(() => settingsRepo.get(), [])
   const teams = useLiveQuery(() => db.teams.orderBy('name').toArray(), [], [])
@@ -112,6 +114,9 @@ export function PiPlanning() {
     [currentTeamIds.join(',')], [] as Task[],
   )
   const statuses = useLiveQuery(() => db.statuses.toArray(), [], [] as Status[])
+  const programBoard = useLiveQuery(
+    async () => (current ? (await boardRepo.forEntity('pi', current.id))[0] ?? null : null), [current?.id], null as Board | null,
+  )
 
   const teamById = new Map(teams.map((t) => [t.id, t]))
   const personById = new Map(people.map((p) => [p.id, p]))
@@ -145,6 +150,35 @@ export function PiPlanning() {
   async function save(id: string, patch: Parameters<typeof repo.update>[1]) {
     const r = await repo.update(id, patch)
     if (!r.ok) toast(r.reason ?? 'Could not save that', true)
+  }
+
+  const iterations = current ? piIterations(current, cfg?.sprintLengthDays ?? 14) : []
+  const bare = (label: string) => label.replace('Iteration ', '')
+  const iterationSpan = iterations.length > 1
+    ? `Iterations ${bare(iterations[0].label)} to ${bare(iterations[iterations.length - 1].label)}`
+    : iterations[0]?.label ?? 'Iterations'
+
+  async function openProgramBoard(p: ProgramIncrement) {
+    if (programBoard) { go('canvas', { board: programBoard.id }); return }
+    if (drawing) return
+    setDrawing(true)
+    try {
+      // Excalidraw is the heaviest thing in the app; only drawing a board pays for it.
+      const { convertToExcalidrawElements } = await import('@excalidraw/excalidraw')
+      const skeleton = programBoardSkeleton({
+        title: `${p.name} — Program board`,
+        iterations,
+        teams: piTeams.map((t) => t.name),
+      })
+      const b = await boardRepo.create(`${p.name} program board`)
+      await boardRepo.save(b.id, convertToExcalidrawElements(skeleton.elements as never), {})
+      await boardRepo.link(b.id, 'pi', p.id)
+      go('canvas', { board: b.id })
+    } catch {
+      toast('Could not draw the program board', true)
+    } finally {
+      setDrawing(false)
+    }
   }
 
   async function planSprintFor(teamId: ID) {
@@ -243,6 +277,28 @@ export function PiPlanning() {
 
             <div className="panel">
               <p className="panel-title">Program board<span className="spacer" /><span className="faint" style={{ fontWeight: 400 }}>each team's iterations in this window</span></p>
+              <div className="pi-board">
+                <button className="pi-board-thumb" onClick={() => void openProgramBoard(current)}
+                  disabled={!programBoard && piTeams.length === 0} aria-label="Open the program board">
+                  {programBoard?.thumbnail
+                    ? <img src={programBoard.thumbnail} alt="" />
+                    : <span className="small faint">{programBoard ? 'Open' : 'Not drawn yet'}</span>}
+                </button>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <b>{programBoard ? programBoard.title : 'Wall board for the planning event'}</b>
+                  <p className="small muted" style={{ margin: '3px 0 9px' }}>
+                    {iterationSpan} across the top, a milestones row and a row per team. Copy feature, dependency and
+                    milestone stickies from the key, and draw red arrows for dependencies.
+                  </p>
+                  {programBoard ? (
+                    <button className="btn primary" onClick={() => void openProgramBoard(current)}>Open program board</button>
+                  ) : (
+                    <button className="btn primary" disabled={piTeams.length === 0 || drawing} onClick={() => void openProgramBoard(current)}>
+                      {drawing ? 'Drawing…' : 'Create program board'}
+                    </button>
+                  )}
+                </div>
+              </div>
               {piTeams.length === 0 ? (
                 <p className="muted small" style={{ margin: 0 }}>No teams in this PI yet — add one above.</p>
               ) : (

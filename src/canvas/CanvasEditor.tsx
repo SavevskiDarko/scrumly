@@ -185,6 +185,11 @@ export default function CanvasEditor({ boardId }: { boardId: string }) {
     .map((l) => tasks.find((t) => t.id === l.entityId))
     .filter(Boolean)
 
+  // A board drawn for you (a program board) has never been viewed, so it has no
+  // zoom yet: show all of it the first time rather than its middle at 100%.
+  const fitOnOpen = !(board.appState as { zoom?: unknown } | null)?.zoom
+    && Array.isArray(board.scene) && board.scene.length > 0
+
   return (
     <>
       {!presenting && (
@@ -229,7 +234,10 @@ export default function CanvasEditor({ boardId }: { boardId: string }) {
           <button className="btn exit-present" onClick={() => setPresenting(false)}>Exit — esc</button>
         )}
         <Excalidraw
-          excalidrawAPI={(api: unknown) => { apiRef.current = api as Api }}
+          excalidrawAPI={(api: unknown) => {
+            apiRef.current = api as Api
+            if (fitOnOpen) setTimeout(() => apiRef.current?.scrollToContent(undefined, { fitToContent: true }), 60)
+          }}
           initialData={{
             elements: (board.scene as never) ?? [],
             appState: { ...(board.appState as object), viewModeEnabled: false },

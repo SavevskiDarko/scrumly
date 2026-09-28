@@ -176,7 +176,7 @@ export interface Blocker {
 export interface Chase { id: ID; blockerId: ID; at: number; note: string }
 export interface Availability { id: ID; personId: ID; sprintId: ID; daysAvailable: number }
 export interface Board { id: ID; title: string; scene: unknown; appState: unknown; thumbnail: string | null; createdAt: number; updatedAt: number }
-export interface BoardLink { id: ID; boardId: ID; entityType: 'task' | 'sprint' | 'team' | 'process'; entityId: ID }
+export interface BoardLink { id: ID; boardId: ID; entityType: 'task' | 'sprint' | 'team' | 'process' | 'pi'; entityId: ID }
 export type NoteType = 'idea' | 'meeting' | 'retro' | 'oneToOne' | 'improvement'
 export interface Note { id: ID; type: NoteType; title: string; body: string; personId: ID | null; sprintId: ID | null; teamId: ID | null; isPrivate: boolean; createdAt: number; updatedAt: number }
 export interface FollowUp { id: ID; title: string; dueDate: string | null; personId: ID | null; sprintId: ID | null; sourceNoteId: ID | null; doneAt: number | null; createdAt: number }

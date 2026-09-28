@@ -534,6 +534,18 @@ button,input,select,textarea{font:inherit;color:inherit}
 .pi-dep-end:hover .pi-dep-title{color:var(--accent)}
 .pi-dep-title{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 
+.pi-board{
+  display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;
+  padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--line);
+}
+.pi-board-thumb{
+  width:180px;height:104px;flex:none;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);
+  display:grid;place-items:center;overflow:hidden;cursor:pointer;padding:0;color:inherit;font:inherit;
+}
+.pi-board-thumb:hover:not(:disabled){border-color:var(--line-strong)}
+.pi-board-thumb:disabled{cursor:default}
+.pi-board-thumb img{max-width:100%;max-height:100%;object-fit:contain}
+
 .conv-row.done{color:var(--faint)}
 
 /* ---------- personal KPIs ---------- */

@@ -61,11 +61,13 @@ export const pi = {
     await db.programIncrements.update(id, { state: 'closed', closedAt: Date.now() })
   },
 
+  /** Its program board stays on the Boards screen; only the link to the PI goes. */
   async remove(id: ID) {
-    await db.transaction('rw', db.programIncrements, db.piObjectives, db.piRisks, db.piVotes, async () => {
+    await db.transaction('rw', [db.programIncrements, db.piObjectives, db.piRisks, db.piVotes, db.boardLinks], async () => {
       await db.piObjectives.where('piId').equals(id).delete()
       await db.piRisks.where('piId').equals(id).delete()
       await db.piVotes.where('piId').equals(id).delete()
+      await db.boardLinks.where('entityId').equals(id).filter((l) => l.entityType === 'pi').delete()
       await db.programIncrements.delete(id)
     })
   },
