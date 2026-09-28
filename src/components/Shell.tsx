@@ -18,6 +18,13 @@ const NAV = [
   { id: 'people', label: 'People' },
 ]
 
+// Per-device, like the theme: a narrow laptop wants it tucked away, a wide monitor doesn't.
+const RAIL_KEY = 'scrumly-rail-collapsed'
+
+function readCollapsed() {
+  try { return localStorage.getItem(RAIL_KEY) === '1' } catch { return false }
+}
+
 function TeamSwitcher({ activeTeamId }: { activeTeamId: string | null }) {
   const toast = useToast()
   const [open, setOpen] = useState(false)
@@ -97,6 +104,7 @@ function TeamSwitcher({ activeTeamId }: { activeTeamId: string | null }) {
 export function Shell({ children }: { children: React.ReactNode }) {
   const route = useRoute()
   const [open, setOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(readCollapsed)
   const cfg = useLiveQuery(() => settings.get(), [])
   const teams = useLiveQuery(() => db.teams.orderBy('name').toArray(), [], [])
   const activeTeamId = (teams.find((t) => t.id === cfg?.activeTeamId) ?? teams[0])?.id ?? null
@@ -111,13 +119,40 @@ export function Shell({ children }: { children: React.ReactNode }) {
   )
   const boardCount = useLiveQuery(() => db.boards.count(), [], 0)
 
+  useEffect(() => {
+    try { localStorage.setItem(RAIL_KEY, collapsed ? '1' : '0') } catch { /* private mode */ }
+  }, [collapsed])
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'b') return
+      // The canvas has its own shortcuts; leave its keys alone.
+      if ((e.target as Element | null)?.closest?.('.excalidraw')) return
+      e.preventDefault()
+      setCollapsed((v) => !v)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   return (
     <div className="app">
-      <nav className={`rail${open ? ' open' : ''}`}>
+      <nav className={`rail${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
         <div className="brand">
           <span className="brand-mark">S</span>
           <span className="brand-name">Scrumly</span>
           <span className="brand-version" title={`Scrumly ${__APP_VERSION__}`}>v{__APP_VERSION__}</span>
+          <button
+            className="rail-toggle"
+            onClick={() => setCollapsed((v) => !v)}
+            title={collapsed ? 'Show menu (Ctrl+B)' : 'Hide menu (Ctrl+B)'}
+            aria-label={collapsed ? 'Show menu' : 'Hide menu'}
+            aria-expanded={!collapsed}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d={collapsed ? 'M6 3.5 10.5 8 6 12.5' : 'M10 3.5 5.5 8 10 12.5'} />
+            </svg>
+          </button>
         </div>
 
         <TeamSwitcher activeTeamId={activeTeamId} />

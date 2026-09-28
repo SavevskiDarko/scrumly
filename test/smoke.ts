@@ -1,3 +1,4 @@
+import './clock'
 import 'fake-indexeddb/auto'
 import { db } from '../src/db/schema'
 import {

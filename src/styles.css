@@ -54,6 +54,19 @@ button,input,select,textarea{font:inherit;color:inherit}
 .brand-mark{width:22px;height:22px;border-radius:6px;background:var(--accent);display:grid;place-items:center;color:var(--accent-ink);font-weight:700;font-size:12px}
 .brand-name{font-weight:650;letter-spacing:-.01em}
 .brand-version{margin-left:auto;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.rail-toggle{
+  flex:none;display:grid;place-items:center;width:22px;height:22px;padding:0;
+  background:none;border:0;border-radius:5px;color:var(--faint);cursor:pointer;
+}
+.rail-toggle:hover{background:var(--surface-3);color:var(--ink)}
+/* Tucked away the rail keeps just the mark and the way back out, so the board
+   gets the width. Desktop only: on a phone the rail is already off-canvas. */
+@media (min-width:761px){
+  .rail.collapsed{width:44px;padding:10px 6px}
+  .rail.collapsed .brand{flex-direction:column;gap:10px;padding:2px 0}
+  .rail.collapsed .brand-name,.rail.collapsed .brand-version,.rail.collapsed .brand ~ *{display:none}
+}
+@media (max-width:760px){.rail-toggle{display:none}}
 .switcher{
   display:flex;align-items:center;gap:6px;width:100%;text-align:left;cursor:pointer;
   background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:6px 8px;
@@ -143,7 +156,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 
 /* ---------- board ---------- */
 .board{display:flex;gap:10px;padding:14px 16px 24px;align-items:flex-start;min-height:100%}
-.column{width:248px;flex:none;display:flex;flex-direction:column;gap:8px;border-radius:var(--r-lg);padding:4px;transition:background .12s}
+/* Full width when there's room, narrower before the board has to scroll sideways. */
+.column{flex:0 1 248px;min-width:200px;display:flex;flex-direction:column;gap:8px;border-radius:var(--r-lg);padding:4px;transition:background .12s}
 .column.over{background:var(--accent-soft)}
 .col-head{display:flex;align-items:center;gap:7px;padding:2px 6px}
 .col-head b{font-size:12px;font-weight:650}
