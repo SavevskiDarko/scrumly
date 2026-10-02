@@ -22,6 +22,7 @@ import { People } from './screens/People'
 import { PiPlanning } from './screens/PiPlanning'
 import { Planning } from './screens/Planning'
 import { Settings } from './screens/Settings'
+import { Sheets } from './screens/Sheets'
 import { Standup } from './screens/Standup'
 
 // The canvas is by far the largest dependency; nothing else should pay for it on startup.
@@ -101,6 +102,7 @@ function Inner() {
   else if (route.screen === 'people') screen = <People teamId={team.id} />
   else if (route.screen === 'standup') screen = <Standup teamId={team.id} />
   else if (route.screen === 'boards') screen = <Boards />
+  else if (route.screen === 'sheets') screen = <Sheets teamId={team.id} />
   else if (route.screen === 'notes') screen = <Notes teamId={team.id} />
   else if (route.screen === 'sprints') screen = <Sprints teamId={team.id} />
   else if (route.screen === 'planning') screen = <Planning teamId={team.id} />

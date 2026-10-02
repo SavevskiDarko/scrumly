@@ -8,6 +8,7 @@ import {
   standups, statuses, tasks, teams, velocity, workingDays, addDays, nextWeekday, runningOrder,
   actionOutcomes, availability, capacityPlan, dependencyState, links, worstState,
   kpis, boardSeries, readKpi, kpiStatus, kpiSummary, formatKpiValue, pi,
+  sheets, parseSheetUrl, embedUrl, browserUrl, signInTarget,
 } from '../src/repo'
 import { flowSkeleton, looksLikeFlow, parseFlow } from '../src/canvas/quickFlow'
 import { piIterations, programBoardSkeleton } from '../src/canvas/programBoard'
@@ -1167,6 +1168,80 @@ async function run() {
   check('and one of something is singular', formatKpiValue(1, 'tasks') === '1 task'
     && formatKpiValue(-1, 'days') === '-1 day' && formatKpiValue(2, 'tasks') === '2 tasks' && formatKpiValue(1, 'h') === '1 h')
 
+  // ---------- Google Sheets ----------
+  console.log('\n  -- sheets --')
+
+  const FILE = '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms'
+  const fromBar = parseSheetUrl(`https://docs.google.com/spreadsheets/d/${FILE}/edit#gid=123`)
+  check('an address-bar link is read, tab and all', fromBar?.fileId === FILE && fromBar.gid === '123' && !fromBar.published,
+    JSON.stringify(fromBar))
+  check('so is the newer form that names the tab twice',
+    parseSheetUrl(`https://docs.google.com/spreadsheets/d/${FILE}/edit?gid=7#gid=7`)?.gid === '7')
+  check('and Share → Copy link', parseSheetUrl(`https://docs.google.com/spreadsheets/d/${FILE}/edit?usp=sharing`)?.gid === null)
+  check('a range after the tab does not hide it',
+    parseSheetUrl(`https://docs.google.com/spreadsheets/d/${FILE}/edit#gid=5&range=A1:C4`)?.gid === '5')
+  check('without https:// it is still a link', parseSheetUrl(`docs.google.com/spreadsheets/d/${FILE}/edit`)?.fileId === FILE)
+  check('a bare id is a sheet too', parseSheetUrl(`  ${FILE} `)?.fileId === FILE)
+  const otherAccount = parseSheetUrl(`https://docs.google.com/spreadsheets/u/1/d/${FILE}/edit`)
+  check('the second signed-in account is kept', otherAccount?.account === '1'
+    && embedUrl(otherAccount) ===`https://docs.google.com/spreadsheets/u/1/d/${FILE}/edit`)
+  const pub = parseSheetUrl('https://docs.google.com/spreadsheets/d/e/2PACX-1vT0aBcDeFgHiJkLmNoPqRsTuVwXyZ/pubhtml?gid=9')
+  check('a published sheet is known for one', pub?.published === true && pub.fileId === '2PACX-1vT0aBcDeFgHiJkLmNoPqRsTuVwXyZ' && pub.gid === '9')
+  check('and is framed as the embeddable page',
+    embedUrl(pub!) === 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT0aBcDeFgHiJkLmNoPqRsTuVwXyZ/pubhtml?widget=true&headers=false&gid=9')
+  check('an ordinary one opens in the editor, on its tab',
+    embedUrl(fromBar!) === `https://docs.google.com/spreadsheets/d/${FILE}/edit?gid=123#gid=123`
+    && browserUrl(fromBar!) === `https://docs.google.com/spreadsheets/d/${FILE}/edit#gid=123`)
+  check('nothing but Google Sheets is let into the frame', [
+    `https://example.com/spreadsheets/d/${FILE}/edit`,
+    `https://docs.google.com.example.com/spreadsheets/d/${FILE}/edit`,
+    `https://docs.google.com/document/d/${FILE}/edit`,
+    `javascript:alert(1)//docs.google.com/spreadsheets/d/${FILE}`,
+    'https://docs.google.com/spreadsheets/d/short/edit',
+    'not a link at all',
+    '',
+  ].every((u) => parseSheetUrl(u) === null))
+  // Both addresses as a real Electron frame landed on them, against real Google.
+  check('a sheet sent to sign in is known by where it would continue to', signInTarget(
+    `https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fdocs.google.com%2Fspreadsheets%2Fd%2F${FILE}%2Fedit&followup=x`) === FILE)
+  check('Docs\' own inner frame passing through sign-in is not mistaken for one', signInTarget(
+    `https://accounts.google.com/ServiceLogin?passive=1209600&continue=https://docs.google.com/drivesharing/clientmodel?id%3D${FILE}%26foreignService%3Dritz`) === null)
+  check('nor is anything without somewhere to continue to',
+    signInTarget('https://accounts.google.com/ServiceLogin') === null && signInTarget('not a url') === null)
+
+  const sheetTeam = await teams.create({ name: 'Sheet Team' })
+  const capSheet = await sheets.add({ url: `https://docs.google.com/spreadsheets/d/${FILE}/edit#gid=0`, title: ' Capacity ', teamId: team.id })
+  check('a sheet is added with its name trimmed', capSheet.ok && capSheet.sheet.title === 'Capacity')
+  const sharedSheet = await sheets.add({ url: FILE, teamId: null })
+  check('a bare id is stored as a link that opens', sharedSheet.ok && sharedSheet.sheet.url === `https://docs.google.com/spreadsheets/d/${FILE}/edit`
+    && sharedSheet.sheet.title === 'Untitled sheet')
+  check('the same tab twice is refused',
+    !(await sheets.add({ url: `https://docs.google.com/spreadsheets/d/${FILE}/edit?gid=0#gid=0`, teamId: team.id })).ok)
+  check('anything else is refused, saying why', (await sheets.add({ url: 'https://example.com/x', teamId: team.id })).ok === false)
+  const other = await sheets.add({ url: `https://docs.google.com/spreadsheets/d/${FILE}/edit#gid=0`, title: 'Theirs', teamId: sheetTeam.id })
+  check('another team may keep the same sheet', other.ok)
+  const forTeam = (await sheets.listForTeam(team.id)).map((s) => s.title)
+  check('a team sees its own sheets and those for every team, in the order added',
+    forTeam.join() === 'Capacity,Untitled sheet', forTeam.join())
+  check('and not another team\'s', !(await sheets.listForTeam(team.id)).some((s) => s.title === 'Theirs'))
+  check('a broken link cannot be saved over a good one',
+    !(await sheets.update(capSheet.ok ? capSheet.sheet.id : '', { url: 'https://example.com' })).ok
+    && (await sheets.get(capSheet.ok ? capSheet.sheet.id : ''))!.url.includes(FILE))
+  await sheets.update(sharedSheet.ok ? sharedSheet.sheet.id : '', { title: 'Roadmap' })
+  check('a sheet can be renamed', (await sheets.get(sharedSheet.ok ? sharedSheet.sheet.id : ''))!.title === 'Roadmap')
+  check('removing a team hands its sheets to every team', (await teams.remove(sheetTeam.id)).ok
+    && (await sheets.get(other.ok ? other.sheet.id : ''))!.teamId === null)
+
+  const snapS = await backup.snapshot()
+  check('backups carry the sheet links', snapS.tables.sheets.length === 3, `${snapS.tables.sheets.length}`)
+  check('a backup from before sheets restores with none',
+    (await backup.restore({ ...snapS, schemaVersion: 5, tables: { ...snapS.tables, sheets: undefined } } as never)).ok
+    && (await db.sheets.count()) === 0)
+  await backup.restore(snapS)
+  check('and a new one brings them back', (await db.sheets.count()) === 3)
+  await sheets.remove(other.ok ? other.sheet.id : '')
+  check('removing one takes only the link', (await db.sheets.count()) === 2)
+
   // ---------- Jira import ----------
   console.log('\n  -- jira --')
 
@@ -1429,6 +1504,10 @@ async function run() {
   const homeNote = await notes.create({ title: 'Home note', teamId: home.id })
   const benKpi = (await kpis.add({ personId: ben!.id, name: 'Reviews' })).kpi!
   await kpis.record(benKpi.id, '2026-03-13', 4)
+  const sheetUrl = (tab: number) => `https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit#gid=${tab}`
+  const workSheet = await sheets.add({ url: sheetUrl(41), title: 'Payments capacity', teamId: jTeam.id })
+  const homeSheet = await sheets.add({ url: sheetUrl(42), title: 'Home budget', teamId: home.id })
+  const anySheet = await sheets.add({ url: sheetUrl(43), title: 'Everyone', teamId: null })
 
   check('nothing is kept back until a team asks', (await currentScope()).empty)
   const everything = await backup.snapshot()
@@ -1449,6 +1528,8 @@ async function run() {
     && kept.has('kpis', benKpi.id) && keptAll('kpiEntries', await db.kpiEntries.where('kpiId').equals(benKpi.id).primaryKeys()))
   check('every other team is untouched',
     !kept.has('teams', home.id) && !kept.has('tasks', homeTask.id) && !kept.has('notes', homeNote.id))
+  check('its sheet links stay, and nobody else\'s', workSheet.ok && kept.has('sheets', workSheet.sheet.id)
+    && homeSheet.ok && !kept.has('sheets', homeSheet.sheet.id) && anySheet.ok && !kept.has('sheets', anySheet.sheet.id))
   check('the switch queued all of it for the cloud',
     tracker.has('teams', jTeam.id) && tracker.has('tasks', pay2.id) && tracker.has('people', ben!.id) && !tracker.has('tasks', homeTask.id))
 
@@ -1456,7 +1537,7 @@ async function run() {
   const mainText = JSON.stringify(main)
   check('a backup leaves all of it out', !main.tables.teams.some((x) => (x as { id: string }).id === jTeam.id)
     && !mainText.includes('PAY-') && !mainText.includes('Charge the card') && !mainText.includes('Ben Builder')
-    && !mainText.includes('Waiting on the bank') && !mainText.includes('JS 1 retro'))
+    && !mainText.includes('Waiting on the bank') && !mainText.includes('JS 1 retro') && !mainText.includes('Payments capacity'))
   check('and keeps everything else', main.tables.tasks.length + local.tables.tasks.length === await db.tasks.count()
     && main.tables.teams.some((x) => (x as { id: string }).id === home.id)
     && main.tables.people.some((x) => (x as { id: string }).id === both.id))

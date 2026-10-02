@@ -28,4 +28,18 @@ contextBridge.exposeInMainWorld('scrumlyDesktop', {
     disconnect: () => ipcRenderer.invoke('scrumly:jira-disconnect'),
     get: (apiPath) => ipcRenderer.invoke('scrumly:jira-get', apiPath),
   },
+  google: {
+    status: () => ipcRenderer.invoke('scrumly:google-status'),
+    signIn: () => ipcRenderer.invoke('scrumly:google-sign-in'),
+    signOut: () => ipcRenderer.invoke('scrumly:google-sign-out'),
+    onNeeded: (fn) => listen('scrumly:google-needed', (url) => fn(String(url))),
+    onChanged: (fn) => listen('scrumly:google-changed', (status) => fn(status)),
+  },
 })
+
+/** Subscribes, and hands back the way to stop: the event object itself never crosses over. */
+function listen(channel, fn) {
+  const handler = (_e, ...args) => fn(...args)
+  ipcRenderer.on(channel, handler)
+  return () => { ipcRenderer.removeListener(channel, handler) }
+}

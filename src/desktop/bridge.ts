@@ -53,6 +53,26 @@ export interface JiraBridge {
   get<T = unknown>(apiPath: string): Promise<JiraResult<T>>
 }
 
+export interface GoogleStatus {
+  /** Google's cookies say an account is signed in on the app's session. */
+  signedIn: boolean
+}
+
+/** Google sign-in for the Sheets screen. Google's own page, in a window of its own. */
+export interface GoogleBridge {
+  status(): Promise<GoogleStatus>
+  /** Opens the sign-in window, or raises it. Resolves once it closes. */
+  signIn(): Promise<GoogleStatus>
+  signOut(): Promise<GoogleStatus>
+  /**
+   * A sheet's frame was sent to Google's sign-in page, which never loads in a
+   * frame. `url` is that sign-in address; its `continue` names the sheet.
+   */
+  onNeeded(fn: (url: string) => void): () => void
+  /** Signed in or out, from whichever window did it. */
+  onChanged(fn: (status: GoogleStatus) => void): () => void
+}
+
 export interface DesktopApi {
   version: string
   info(): Promise<DesktopInfo>
@@ -66,6 +86,8 @@ export interface DesktopApi {
   reveal(): Promise<void>
   /** Absent in desktop builds from before the Jira import. */
   jira?: JiraBridge
+  /** Absent in desktop builds from before the Sheets screen. */
+  google?: GoogleBridge
 }
 
 declare global {
@@ -86,6 +108,10 @@ export function isDesktop(): boolean {
 
 export function jiraBridge(): JiraBridge | null {
   return desktopApi()?.jira ?? null
+}
+
+export function googleBridge(): GoogleBridge | null {
+  return desktopApi()?.google ?? null
 }
 
 /** Human-sized, for the Settings panel. Bytes are never the interesting part. */

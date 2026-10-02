@@ -29,7 +29,13 @@ app.setName('Scrumly')
 
 const storage = require('./storage.cjs')
 const jira = require('./jira.cjs')
+const google = require('./google.cjs')
 const updates = require('./updates.cjs')
+
+// Before any window exists, so every one of them and every frame in them
+// agree. Google refuses sign-in to anything announcing itself as Electron;
+// the reason is in google.cjs.
+app.userAgentFallback = google.plainUserAgent(app.userAgentFallback, app.getName())
 
 const DIST = path.join(__dirname, '..', 'dist')
 const DEV_URL = process.env.SCRUMLY_DEV_URL || null
@@ -101,8 +107,11 @@ function createWindow() {
 
   // Excalidraw's help links and anything else external belong in the real
   // browser; a Scrumly window that can navigate away from Scrumly is a trap.
+  // Google's sign-in is the exception: a sheet asking for it needs the app
+  // signed in, not the browser, so it gets the sign-in window instead.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url)) void shell.openExternal(url)
+    if (google.isSignInUrl(url)) void google.signIn(mainWindow, url)
+    else if (/^https?:/.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
   // Prefix, not origin: URL.origin is the string 'null' for a non-special
@@ -112,8 +121,10 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (e, url) => {
     if (url.startsWith(home)) return
     e.preventDefault()
-    if (/^https?:/.test(url)) void shell.openExternal(url)
+    if (google.isSignInUrl(url)) void google.signIn(mainWindow, url)
+    else if (/^https?:/.test(url)) void shell.openExternal(url)
   })
+  google.watch(mainWindow.webContents)
 
   if (DEV_URL) void mainWindow.loadURL(DEV_URL)
   else void mainWindow.loadURL(`${APP_ORIGIN}/`)
@@ -189,6 +200,12 @@ function registerIpc() {
   ipcMain.handle('scrumly:jira-connect', (_e, input) => jira.connect(input))
   ipcMain.handle('scrumly:jira-disconnect', () => jira.disconnect())
   ipcMain.handle('scrumly:jira-get', (_e, apiPath) => jira.request(apiPath))
+
+  // Google for the Sheets screen: whether the app is signed in, and the
+  // window to sign in with. What Google knows stays in its cookies.
+  ipcMain.handle('scrumly:google-status', () => google.status())
+  ipcMain.handle('scrumly:google-sign-in', () => google.signIn(mainWindow))
+  ipcMain.handle('scrumly:google-sign-out', () => google.signOut(mainWindow))
 
   ipcMain.handle('scrumly:choose-dir', async () => {
     const options = {

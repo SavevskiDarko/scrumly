@@ -2,7 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useRef, useState } from 'react'
 import { db } from '../db/schema'
 import { go, useRoute } from '../hooks/useRoute'
-import { blockers, people, settings, teams as teamRepo } from '../repo'
+import { blockers, people, settings, sheets, teams as teamRepo } from '../repo'
 import { useToast } from './Toast'
 
 const NAV = [
@@ -11,6 +11,7 @@ const NAV = [
   { id: 'blockers', label: 'Blockers' },
   { id: 'standup', label: 'Stand-up' },
   { id: 'boards', label: 'Boards' },
+  { id: 'sheets', label: 'Sheets' },
   { id: 'notes', label: 'Notes' },
   { id: 'sprints', label: 'Sprints' },
   { id: 'planning', label: 'Sprint planning' },
@@ -118,6 +119,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
     [activeTeamId], 0,
   )
   const boardCount = useLiveQuery(() => db.boards.count(), [], 0)
+  const sheetCount = useLiveQuery(
+    async () => (activeTeamId ? (await sheets.listForTeam(activeTeamId)).length : 0),
+    [activeTeamId], 0,
+  )
 
   useEffect(() => {
     try { localStorage.setItem(RAIL_KEY, collapsed ? '1' : '0') } catch { /* private mode */ }
@@ -169,6 +174,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 {item.id === 'people' && <span className="count">{peopleCount}</span>}
                 {item.id === 'blockers' && blockedCount > 0 && <span className="count hot">{blockedCount}</span>}
                 {item.id === 'boards' && boardCount > 0 && <span className="count">{boardCount}</span>}
+                {item.id === 'sheets' && sheetCount > 0 && <span className="count">{sheetCount}</span>}
               </button>
             </li>
           ))}

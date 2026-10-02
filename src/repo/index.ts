@@ -36,3 +36,5 @@ export {
   kpis, boardSeries, readKpi, kpiStatus, kpiSummary, formatKpiValue, KPI_SOURCES, KPI_TEMPLATES, BOARD_SOURCES,
 } from './kpis'
 export type { BoardHistory, KpiPoint, KpiReading, KpiStatus, KpiSummary } from './kpis'
+export { sheets, parseSheetUrl, embedUrl, browserUrl, signInTarget, NOT_A_SHEET } from './sheets'
+export type { SheetRef, SheetResult } from './sheets'

@@ -63,7 +63,7 @@ export const teams = {
     const total = await db.teams.count()
     if (total <= 1) return { ok: false, reason: 'You need at least one team' }
 
-    await db.transaction('rw', db.teams, db.people, db.standups, db.standupNotes, async () => {
+    await db.transaction('rw', [db.teams, db.people, db.standups, db.standupNotes, db.sheets], async () => {
       const members = await db.people.where('teamIds').equals(id).toArray()
       for (const m of members) {
         await db.people.update(m.id, { teamIds: m.teamIds.filter((t) => t !== id) })
@@ -72,6 +72,9 @@ export const teams = {
       // otherwise surface against people who joined another team.
       await db.standupNotes.where('teamId').equals(id).delete()
       await db.standups.where('teamId').equals(id).delete()
+      // A sheet link is cheap to keep and annoying to find again, so it moves
+      // to every team rather than disappearing with this one.
+      await db.sheets.where('teamId').equals(id).modify({ teamId: null })
       await db.teams.delete(id)
     })
     return { ok: true }

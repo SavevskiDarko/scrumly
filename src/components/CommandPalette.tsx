@@ -51,6 +51,7 @@ export function CommandPalette({
       { id: 'g-blockers', group: 'Go to', label: 'Blockers', run: () => go('blockers') },
       { id: 'g-sprints', group: 'Go to', label: 'Sprints', run: () => go('sprints') },
       { id: 'g-planning', group: 'Go to', label: 'Sprint planning', run: () => go('planning') },
+      { id: 'g-sheets', group: 'Go to', label: 'Sheets', run: () => go('sheets') },
       { id: 'g-people', group: 'Go to', label: 'People', run: () => go('people') },
       { id: 'g-settings', group: 'Go to', label: 'Settings', run: () => go('settings') },
     ].filter((a) => !needle || match(a.label))

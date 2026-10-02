@@ -135,9 +135,10 @@ English. The diagrams are unaffected.
 Schema v2 adds two tables: `sprintEvents` (which task joined or left
 which sprint, and when) and `conversions` (what a note turned into).
 v3 adds `standupNotes` — what each person said, one row per person per
-stand-up. v4 adds PI Planning's four tables, and v5 adds `kpis` and
+stand-up. v4 adds PI Planning's four tables, v5 adds `kpis` and
 `kpiEntries` — what each person is measured on, and the readings typed in
-for the hand-tracked ones. All of them add stores only, so Dexie carries
+for the hand-tracked ones — and v6 adds `sheets`, the Google Sheets links
+below. All of them add stores only, so Dexie carries
 every existing row across untouched. A backup written under an earlier
 version still restores, and
 each version has its own test for exactly that, because it is the one
@@ -174,6 +175,51 @@ Now:
 Columns and whiteboards stay shared across teams on purpose: the
 workflow and the diagrams are usually yours rather than any one team's.
 Say the word if a team should own its own columns.
+
+## Sheets
+
+Google Sheets kept to hand: paste a link and the real sheet opens inside
+Scrumly, one tab per sheet, editable exactly as far as Google lets you edit
+it. Scrumly stores the link and nothing else — never a copy — so it is
+never stale, and none of the sheet's contents end up in a backup, the data
+file, or sync.
+
+- **Any link Google hands out works:** the address bar, Share → Copy link, a
+  link to one tab (it opens on that tab), `/u/1/` for a second signed-in
+  account, Publish to web (read-only, for anyone), or a bare id. Anything
+  that is not `docs.google.com/spreadsheets/…` is refused, because whatever
+  is accepted gets loaded into a frame inside the app
+- **A sheet belongs to the team that added it,** or to every team if ticked.
+  One added under a team kept on this computer only stays on this computer
+  with it. Removing a team hands its sheets to every team rather than losing
+  them
+- **Sheets already opened stay loaded** behind the one on screen, so flipping
+  between two is instant and each keeps its place. Reload asks Google again
+
+### Signing in
+
+A sheet shared with "anyone with the link", or published, opens straight
+away. A private one opens only for a Google account that can see it, and
+Google will not run its sign-in page inside a frame — it answers with a bare
+"401. That's an error." So:
+
+- **In the browser,** a sheet uses whatever Google account the browser is
+  already signed in to
+- **In the desktop app,** Sign in to Google opens Google's own sign-in in a
+  window of its own (`electron/google.cjs`), on the app's session, so the
+  cookies it leaves are the ones every sheet's frame sends. Nothing typed into
+  it passes through Scrumly, and the account is in those cookies only — not
+  the database, not the data file. Sign out clears them. A sheet whose frame
+  lands on the sign-in page is covered with a note saying so, rather than
+  Google's error; the sign-in address names the sheet it would continue to,
+  which is how the right one is covered. Docs' own inner frames brush past the
+  sign-in page on every sheet, public ones too, which is why landing there is
+  what counts and only a sheet's own address does
+
+Google turns away sign-in from a browser that announces itself as Electron,
+so the desktop app's user agent drops its `Electron/…` and `Scrumly/…`
+tokens and reads as the Chrome version it is. It is set app-wide, so the
+frames and the sign-in window look the same to Google.
 
 ## Dates
 

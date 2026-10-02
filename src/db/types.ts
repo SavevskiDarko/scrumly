@@ -280,3 +280,18 @@ export interface KpiEntry {
   note: string
   at: number
 }
+
+/**
+ * A Google Sheet kept to hand on the Sheets screen. Only the link is stored:
+ * the sheet itself stays in Google and is opened from there each time, so it
+ * is never out of date and nothing in it ends up in a backup.
+ */
+export interface Sheet {
+  id: ID
+  title: string
+  /** The link as pasted, already checked to be a Google Sheet (src/repo/sheets.ts). */
+  url: string
+  /** Null shows it whichever team is open. */
+  teamId: ID | null
+  createdAt: number
+}
