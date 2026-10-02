@@ -53,24 +53,23 @@ export interface JiraBridge {
   get<T = unknown>(apiPath: string): Promise<JiraResult<T>>
 }
 
-export interface GoogleStatus {
-  /** Google's cookies say an account is signed in on the app's session. */
-  signedIn: boolean
-}
-
-/** Google sign-in for the Sheets screen. Google's own page, in a window of its own. */
-export interface GoogleBridge {
-  status(): Promise<GoogleStatus>
-  /** Opens the sign-in window, or raises it. Resolves once it closes. */
-  signIn(): Promise<GoogleStatus>
-  signOut(): Promise<GoogleStatus>
+/**
+ * The Sheets screen's way out for private sheets. Google will not sign anyone
+ * in inside a desktop app, so those open in the user's own browser, where they
+ * already are signed in (electron/sheets.cjs).
+ */
+export interface SheetsBridge {
   /**
-   * A sheet's frame was sent to Google's sign-in page, which never loads in a
-   * frame. `url` is that sign-in address; its `continue` names the sheet.
+   * Opens a Google Sheet in an app window of Chrome or Edge. Resolves with
+   * where it went — an ordinary browser tab when neither could be started —
+   * or null for an address that is not a sheet.
    */
-  onNeeded(fn: (url: string) => void): () => void
-  /** Signed in or out, from whichever window did it. */
-  onChanged(fn: (status: GoogleStatus) => void): () => void
+  openWindow(url: string): Promise<'Chrome' | 'Edge' | 'browser' | null>
+  /**
+   * A sheet's frame landed on Google's sign-in page, which inside a frame
+   * shows only an error. `url` is that address; its `continue` names the sheet.
+   */
+  onSignInNeeded(fn: (url: string) => void): () => void
 }
 
 export interface DesktopApi {
@@ -87,7 +86,7 @@ export interface DesktopApi {
   /** Absent in desktop builds from before the Jira import. */
   jira?: JiraBridge
   /** Absent in desktop builds from before the Sheets screen. */
-  google?: GoogleBridge
+  sheets?: SheetsBridge
 }
 
 declare global {
@@ -110,8 +109,8 @@ export function jiraBridge(): JiraBridge | null {
   return desktopApi()?.jira ?? null
 }
 
-export function googleBridge(): GoogleBridge | null {
-  return desktopApi()?.google ?? null
+export function sheetsBridge(): SheetsBridge | null {
+  return desktopApi()?.sheets ?? null
 }
 
 /** Human-sized, for the Settings panel. Bytes are never the interesting part. */

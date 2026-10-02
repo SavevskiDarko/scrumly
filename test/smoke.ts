@@ -1209,6 +1209,28 @@ async function run() {
   check('nor is anything without somewhere to continue to',
     signInTarget('https://accounts.google.com/ServiceLogin') === null && signInTarget('not a url') === null)
 
+  // A private sheet opens in the user's own browser, which is where they are signed in to Google.
+  const { isSheetUrl, pickBrowser } = createRequire(import.meta.url)('../electron/sheets.cjs') as {
+    isSheetUrl(u: string): boolean
+    pickBrowser(o: { platform: string; env: Record<string, string>; exists(p: string): boolean; progId: string | null }): string | null
+  }
+  const winEnv = { ProgramFiles: 'C:\\Program Files', 'ProgramFiles(x86)': 'C:\\Program Files (x86)', LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local' }
+  const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+  const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+  const installed = (...paths: string[]) => (p: string) => paths.includes(p)
+  check('Chrome is the browser a sheet opens in', pickBrowser({ platform: 'win32', env: winEnv, exists: installed(CHROME, EDGE), progId: 'ChromeHTML' }) === CHROME)
+  check('and still is when the default is neither', pickBrowser({ platform: 'win32', env: winEnv, exists: installed(CHROME, EDGE), progId: 'FirefoxURL-308046B0AF4A39CB' }) === CHROME)
+  check('unless Edge is the default', pickBrowser({ platform: 'win32', env: winEnv, exists: installed(CHROME, EDGE), progId: 'MSEdgeHTM' }) === EDGE)
+  check('Edge stands in when Chrome is not there', pickBrowser({ platform: 'win32', env: winEnv, exists: installed(EDGE), progId: null }) === EDGE)
+  check('a per-user Chrome is found too', pickBrowser({ platform: 'win32', env: winEnv,
+    exists: installed('C:\\Users\\me\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe'), progId: null })?.endsWith('Local\\Google\\Chrome\\Application\\chrome.exe') === true)
+  check('with neither, or off Windows, it is an ordinary browser tab',
+    pickBrowser({ platform: 'win32', env: winEnv, exists: installed(), progId: null }) === null
+    && pickBrowser({ platform: 'darwin', env: winEnv, exists: () => true, progId: null }) === null)
+  check('the browser is only ever started with a sheet', isSheetUrl(browserUrl(fromBar!))
+    && !isSheetUrl('https://example.com/') && !isSheetUrl('file:///C:/Windows/System32/calc.exe')
+    && !isSheetUrl('https://docs.google.com.example.com/spreadsheets/d/x') && !isSheetUrl(undefined as never))
+
   const sheetTeam = await teams.create({ name: 'Sheet Team' })
   const capSheet = await sheets.add({ url: `https://docs.google.com/spreadsheets/d/${FILE}/edit#gid=0`, title: ' Capacity ', teamId: team.id })
   check('a sheet is added with its name trimmed', capSheet.ok && capSheet.sheet.title === 'Capacity')

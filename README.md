@@ -196,30 +196,34 @@ file, or sync.
 - **Sheets already opened stay loaded** behind the one on screen, so flipping
   between two is instant and each keeps its place. Reload asks Google again
 
-### Signing in
+### Private sheets
 
 A sheet shared with "anyone with the link", or published, opens straight
-away. A private one opens only for a Google account that can see it, and
-Google will not run its sign-in page inside a frame — it answers with a bare
-"401. That's an error." So:
+away. A private one opens only for a Google account that can see it.
 
 - **In the browser,** a sheet uses whatever Google account the browser is
   already signed in to
-- **In the desktop app,** Sign in to Google opens Google's own sign-in in a
-  window of its own (`electron/google.cjs`), on the app's session, so the
-  cookies it leaves are the ones every sheet's frame sends. Nothing typed into
-  it passes through Scrumly, and the account is in those cookies only — not
-  the database, not the data file. Sign out clears them. A sheet whose frame
-  lands on the sign-in page is covered with a note saying so, rather than
-  Google's error; the sign-in address names the sheet it would continue to,
-  which is how the right one is covered. Docs' own inner frames brush past the
-  sign-in page on every sheet, public ones too, which is why landing there is
-  what counts and only a sheet's own address does
+- **In the desktop app,** there is no signing in to Google at all, on
+  purpose. Google does not let anyone sign in inside a desktop app — its
+  sign-in page answers "This browser or app may not be secure", so that no
+  app ever handles a Google password. 0.3.9 shipped a sign-in window, and a
+  user agent with Electron's name taken out, to try; Google turned it away
+  regardless, and the next release took both out again. Getting round that check is not
+  something Scrumly does
 
-Google turns away sign-in from a browser that announces itself as Electron,
-so the desktop app's user agent drops its `Electron/…` and `Scrumly/…`
-tokens and reads as the Chrome version it is. It is set app-wide, so the
-frames and the sign-in window look the same to Google.
+So in the desktop app a private sheet opens in a window of your own Chrome
+— Edge if Chrome is not installed, or if Edge is your default browser — in
+app mode: no tabs, no address bar, the real editor, and the account you are
+already signed in with there, company single sign-on included
+(`electron/sheets.cjs`). Scrumly starts the window and sees nothing of it
+after that. Open in window on the toolbar does the same for any sheet.
+
+Inside a frame, Google's sign-in page shows only "401. That's an error.", so
+a sheet whose frame lands there is covered with a note and the Open in window
+button instead. The sign-in address names the sheet it would continue to,
+which is how the right one is covered. Docs' own inner frames brush past the
+sign-in page on every sheet, public ones too, which is why landing there is
+what counts, and only a sheet's own address does.
 
 ## Dates
 

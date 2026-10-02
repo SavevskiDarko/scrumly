@@ -3,9 +3,11 @@ import { useEffect, useState } from 'react'
 import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
 import type { Sheet } from '../db/types'
-import { googleBridge, type GoogleStatus } from '../desktop/bridge'
+import { sheetsBridge } from '../desktop/bridge'
 import { setParam, useRoute } from '../hooks/useRoute'
-import { NOT_A_SHEET, browserUrl, embedUrl, parseSheetUrl, sheets as sheetRepo, signInTarget } from '../repo'
+import {
+  NOT_A_SHEET, browserUrl, embedUrl, parseSheetUrl, sheets as sheetRepo, signInTarget, type SheetRef,
+} from '../repo'
 
 // Per device, like the rail: which sheet was open last, so coming back lands on it.
 const LAST_KEY = 'scrumly-sheet-last'
@@ -18,32 +20,22 @@ function writeLast(id: string) {
 }
 
 /**
- * The desktop app's Google sign-in, and which sheets Google has turned away
- * for want of it. The browser has none of this: there a sheet uses whatever
- * Google account the browser itself is signed in to.
+ * Which sheets Google has asked to sign in for, in the desktop app. Google
+ * will not sign anyone in there, so those open in a window of the user's own
+ * browser instead. The browser build has none of this: a sheet there uses
+ * whatever Google account the browser itself is signed in to.
  */
-function useGoogle() {
-  const [bridge] = useState(googleBridge)
-  const [status, setStatus] = useState<GoogleStatus | null>(null)
+function usePrivateSheets() {
+  const [bridge] = useState(sheetsBridge)
   // File ids whose frame landed on Google's sign-in page.
   const [refused, setRefused] = useState<ReadonlySet<string>>(new Set())
-  // Bumped on every sign-in or sign-out, which reloads every frame with the new cookies.
-  const [generation, setGeneration] = useState(0)
 
   useEffect(() => {
     if (!bridge) return
-    let live = true
-    void bridge.status().then((s) => { if (live) setStatus(s) })
-    const offNeeded = bridge.onNeeded((url) => {
+    return bridge.onSignInNeeded((url) => {
       const fileId = signInTarget(url)
       if (fileId) setRefused((r) => new Set(r).add(fileId))
     })
-    const offChanged = bridge.onChanged((s) => {
-      setStatus(s)
-      setRefused(new Set())
-      setGeneration((g) => g + 1)
-    })
-    return () => { live = false; offNeeded(); offChanged() }
   }, [bridge])
 
   /** A reload asks Google again, so what it said last time no longer stands. */
@@ -56,7 +48,7 @@ function useGoogle() {
     })
   }
 
-  return { bridge, status, refused, generation, forget }
+  return { bridge, refused, forget }
 }
 
 export function Sheets({ teamId }: { teamId: string }) {
@@ -64,7 +56,7 @@ export function Sheets({ teamId }: { teamId: string }) {
   const route = useRoute()
   const rows = useLiveQuery(() => sheetRepo.listForTeam(teamId), [teamId])
   const team = useLiveQuery(() => db.teams.get(teamId), [teamId])
-  const google = useGoogle()
+  const priv = usePrivateSheets()
   const [editing, setEditing] = useState<Sheet | 'new' | null>(null)
   // Sheets already opened stay loaded behind the one on screen, so flipping
   // between two is instant and each keeps its place.
@@ -82,15 +74,16 @@ export function Sheets({ teamId }: { teamId: string }) {
     writeLast(current.id)
   }, [current?.id])
 
-  async function signIn() {
-    if (!google.bridge) return
-    const s = await google.bridge.signIn()
-    toast(s.signedIn ? 'Signed in to Google' : 'Not signed in to Google', !s.signedIn)
+  async function openWindow(ref: SheetRef) {
+    if (!priv.bridge) return
+    const where = await priv.bridge.openWindow(browserUrl(ref))
+    if (where === null) toast(NOT_A_SHEET, true)
+    else toast(where === 'browser' ? 'Opened in your browser' : `Opened in a ${where} window`)
   }
 
   if (rows === undefined) return null
 
-  const needsSignIn = Boolean(google.bridge && currentRef && google.refused.has(currentRef.fileId))
+  const isPrivate = Boolean(priv.bridge && currentRef && priv.refused.has(currentRef.fileId))
 
   return (
     <>
@@ -98,18 +91,6 @@ export function Sheets({ teamId }: { teamId: string }) {
         <h1>Sheets</h1>
         <span className="chip solid">{rows.length}</span>
         <span className="spacer" />
-        {google.bridge && google.status && (google.status.signedIn
-          ? (
-            <>
-              <span className="chip ok">Signed in to Google</span>
-              <button className="btn ghost sm" onClick={async () => {
-                if (!confirm('Sign this app out of Google? Private sheets will ask you to sign in again.')) return
-                await google.bridge!.signOut()
-                toast('Signed out of Google')
-              }}>Sign out</button>
-            </>
-          )
-          : <button className="btn" onClick={signIn}>Sign in to Google</button>)}
         <button className="btn primary" onClick={() => setEditing('new')}>Add sheet</button>
       </div>
 
@@ -123,8 +104,8 @@ export function Sheets({ teamId }: { teamId: string }) {
               <button className="btn primary" onClick={() => setEditing('new')}>Add a Google Sheet</button>
             </div>
             <p className="small" style={{ marginTop: 14 }}>
-              {google.bridge
-                ? 'Sheets shared with "anyone with the link" open straight away. Private ones need Sign in to Google first.'
+              {priv.bridge
+                ? 'Sheets shared with "anyone with the link" open right here. Private ones open in a window of your own Chrome or Edge, where you are already signed in to Google.'
                 : 'Private sheets open with the Google account this browser is signed in to.'}
             </p>
           </div>
@@ -150,10 +131,13 @@ export function Sheets({ teamId }: { teamId: string }) {
             {current && currentRef && (
               <div className="sheet-actions">
                 <button className="btn ghost sm" title="Load the sheet again from Google" onClick={() => {
-                  google.forget(currentRef.fileId)
+                  priv.forget(currentRef.fileId)
                   setLoads((l) => ({ ...l, [current.id]: (l[current.id] ?? 0) + 1 }))
                 }}>Reload</button>
-                <a className="btn ghost sm" href={browserUrl(currentRef)} target="_blank" rel="noreferrer">Open in browser</a>
+                {priv.bridge
+                  ? <button className="btn ghost sm" title="Open it in a window of your own Chrome or Edge"
+                    onClick={() => openWindow(currentRef)}>Open in window</button>
+                  : <a className="btn ghost sm" href={browserUrl(currentRef)} target="_blank" rel="noreferrer">Open in browser</a>}
                 <button className="btn ghost sm" onClick={() => setEditing(current)}>Edit</button>
               </div>
             )}
@@ -165,7 +149,7 @@ export function Sheets({ teamId }: { teamId: string }) {
               if (!ref) return null
               return (
                 <iframe
-                  key={`${s.id}:${s.url}:${loads[s.id] ?? 0}:${google.generation}`}
+                  key={`${s.id}:${s.url}:${loads[s.id] ?? 0}`}
                   className={`sheet-frame${s.id === current?.id ? '' : ' hidden'}`}
                   src={embedUrl(ref)}
                   title={s.title}
@@ -176,16 +160,19 @@ export function Sheets({ teamId }: { teamId: string }) {
             {current && !currentRef && (
               <div className="sheet-cover"><div className="empty"><strong>That link no longer reads as a sheet</strong>{NOT_A_SHEET}</div></div>
             )}
-            {needsSignIn && (
+            {isPrivate && currentRef && (
               <div className="sheet-cover">
                 <div className="empty">
-                  <strong>Google wants you signed in</strong>
-                  This sheet is not shared with "anyone with the link", so Google only shows it to an account that
-                  can open it.
-                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 14 }}>
-                    <button className="btn primary" onClick={signIn}>Sign in to Google</button>
-                    {currentRef && <a className="btn" href={browserUrl(currentRef)} target="_blank" rel="noreferrer">Open in browser</a>}
+                  <strong>This sheet is private</strong>
+                  Google only shows it to an account that can open it, and does not let anyone sign in inside a
+                  desktop app. It opens in a window of your own Chrome or Edge instead, where you are already
+                  signed in.
+                  <div style={{ marginTop: 14 }}>
+                    <button className="btn primary" onClick={() => openWindow(currentRef)}>Open in window</button>
                   </div>
+                  <p className="small" style={{ marginTop: 14 }}>
+                    Shared as "anyone with the link", it would open right here.
+                  </p>
                 </div>
               </div>
             )}

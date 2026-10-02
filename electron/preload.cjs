@@ -28,12 +28,9 @@ contextBridge.exposeInMainWorld('scrumlyDesktop', {
     disconnect: () => ipcRenderer.invoke('scrumly:jira-disconnect'),
     get: (apiPath) => ipcRenderer.invoke('scrumly:jira-get', apiPath),
   },
-  google: {
-    status: () => ipcRenderer.invoke('scrumly:google-status'),
-    signIn: () => ipcRenderer.invoke('scrumly:google-sign-in'),
-    signOut: () => ipcRenderer.invoke('scrumly:google-sign-out'),
-    onNeeded: (fn) => listen('scrumly:google-needed', (url) => fn(String(url))),
-    onChanged: (fn) => listen('scrumly:google-changed', (status) => fn(status)),
+  sheets: {
+    openWindow: (url) => ipcRenderer.invoke('scrumly:sheet-window', url),
+    onSignInNeeded: (fn) => listen('scrumly:sheet-needs-sign-in', (url) => fn(String(url))),
   },
 })
 
