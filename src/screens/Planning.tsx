@@ -263,8 +263,8 @@ export function Planning({ teamId }: { teamId: string }) {
                 )}
                 {plan.unsized > 0 && (
                   <p className="small faint" style={{ margin: '4px 0 0' }}>
-                    {plan.unsized} task{plan.unsized === 1 ? ' has' : 's have'} no size and count{plan.unsized === 1 ? 's' : ''} as
-                    one point each. Size them below and the numbers firm up.
+                    {plan.unsized} task{plan.unsized === 1 ? ' has' : 's have'} no size and add{plan.unsized === 1 ? 's' : ''} nothing
+                    to the points. Size them below and the numbers firm up.
                   </p>
                 )}
               </div>

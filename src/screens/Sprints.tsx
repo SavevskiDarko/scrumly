@@ -163,11 +163,13 @@ export function Sprints({ teamId }: { teamId: string }) {
 
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'stretch' }}>
               <div className="panel" style={{ flex: 1.5, minWidth: 280 }}>
-                <p className="panel-title">Burndown<span className="spacer" /><span className="faint" style={{ fontWeight: 400 }}>points · working days</span></p>
+                <p className="panel-title">Burndown<span className="spacer" /><span className="faint" style={{ fontWeight: 400 }}>{stats!.burndownUnit} · working days</span></p>
                 <Burndown series={stats!.series} />
                 <p className="small faint" style={{ margin: '6px 0 0' }}>
                   Replayed from the move history, so it is right even for sprints that ran before this screen existed.
-                  A task with no size counts as one point.
+                  {stats!.burndownUnit === 'points'
+                    ? ' A task with no size adds no points, same as velocity.'
+                    : ' Nothing in this sprint is sized yet, so it burns down tasks instead of points.'}
                 </p>
               </div>
               <div className="panel" style={{ flex: 1, minWidth: 190 }}>

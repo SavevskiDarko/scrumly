@@ -525,22 +525,33 @@ async function run() {
   check('and still logs it', (await db.sprintEvents.where('taskId').equals(carried.id).toArray())
     .some((e) => e.fromSprintId === carryFrom.id && e.toSprintId === carryTo.id))
 
-  // The burndown counts points, and an unsized task is worth one.
+  // A sprint nobody has sized burns down tasks, or the line would sit flat at zero.
   const ptSprint = await sprints.plan({ teamId: rTeam.id, lengthDays: 14, startDate: '2026-09-14' })
+  const unsized = await tasks.create({ teamId: rTeam.id, statusId: rTodo.id, title: 'Nobody sized this' })
+  await tasks.setSprint(unsized.id, ptSprint.id)
+  let pts = await statsFor(ptSprint.id)
+  check('an unsized sprint has no points', pts.points === 0, String(pts.points))
+  check('so its burndown counts tasks', pts.burndownUnit === 'tasks' && pts.series[0].ideal === 1,
+    `${pts.burndownUnit} from ${pts.series[0].ideal}`)
+
+  // Once anything is sized it counts points, and an unsized task is worth none — same as Jira.
   const big = await tasks.create({ teamId: rTeam.id, statusId: rTodo.id, title: 'Eight pointer', size: 8 })
   const small = await tasks.create({ teamId: rTeam.id, statusId: rTodo.id, title: 'Three pointer', size: 3 })
-  const unsized = await tasks.create({ teamId: rTeam.id, statusId: rTodo.id, title: 'Nobody sized this' })
-  for (const t of [big, small, unsized]) await tasks.setSprint(t.id, ptSprint.id)
-  let pts = await statsFor(ptSprint.id)
-  check('the sprint totals points, not cards', pts.points === 12, String(pts.points))
-  check('an unsized task is worth one point', pts.total === 3 && pts.points === 12)
-  check('the ideal line starts at the point total', pts.series[0].ideal === 12, String(pts.series[0].ideal))
-  check('nothing is burned down yet', pts.series[pts.series.length - 1].remaining === 12)
+  const zero = await tasks.create({ teamId: rTeam.id, statusId: rTodo.id, title: 'Sized at zero', size: 0 })
+  for (const t of [big, small, zero]) await tasks.setSprint(t.id, ptSprint.id)
+  pts = await statsFor(ptSprint.id)
+  check('the sprint totals points, not cards', pts.points === 11, String(pts.points))
+  check('an unsized or zero-point task is worth nothing', pts.total === 4 && pts.points === 11)
+  check('the burndown counts points', pts.burndownUnit === 'points')
+  check('the ideal line starts at the point total', pts.series[0].ideal === 11, String(pts.series[0].ideal))
+  check('nothing is burned down yet', pts.series[pts.series.length - 1].remaining === 11)
   await tasks.move(big.id, rDone.id, null)
+  await tasks.move(unsized.id, rDone.id, null)
   pts = await statsFor(ptSprint.id)
   check('finishing an eight-pointer burns eight, not one',
-    pts.series[pts.series.length - 1].remaining === 4, String(pts.series[pts.series.length - 1].remaining))
-  check('and points done tracks it', pts.pointsDone === 8, String(pts.pointsDone))
+    pts.series[pts.series.length - 1].remaining === 3, String(pts.series[pts.series.length - 1].remaining))
+  check('and points done tracks it, the unsized one adding nothing', pts.pointsDone === 8 && pts.done === 2,
+    `${pts.pointsDone} points, ${pts.done} done`)
 
   // Setup must not be able to lay down a second set of columns.
   const columnsBefore = (await statuses.list()).length
@@ -926,8 +937,8 @@ async function run() {
   check('the forecast reads what the team delivered', cap.forecast === 20 && cap.averageVelocity === 20,
     `${cap.forecast} / ${cap.averageVelocity}`)
   check('capacity is every working day when nobody is out', cap.personDays === 20 && cap.fullPersonDays === 20)
-  check('planned points count an unsized task as one', cap.plannedPoints === 12, String(cap.plannedPoints))
-  check('unsized and unassigned work is called out', cap.unsized === 1 && cap.unassignedPoints === 1)
+  check('planned points leave an unsized task out', cap.plannedPoints === 11, String(cap.plannedPoints))
+  check('unsized work is called out', cap.unsized === 1 && cap.unassignedPoints === 0)
 
   await availability.set(ana.id, pNext.id, 5)
   cap = await readPlan()
@@ -1087,14 +1098,16 @@ async function run() {
   let hist = await boardHistory()
 
   const kimPoints = boardSeries('points', kimP, hist)
-  check('points count what they finished inside each sprint, unsized as one',
-    kimPoints.map((p) => p.value).join() === '6,0', kimPoints.map((p) => `${p.label}=${p.value}`).join(' '))
+  check('points count what they finished inside each sprint, unsized as nothing',
+    kimPoints.map((p) => p.value).join() === '5,0', kimPoints.map((p) => `${p.label}=${p.value}`).join(' '))
   check('a sprint they were in and finished nothing in is a real zero', kimPoints[1]?.label === k2.name)
   check('a sprint they were out for entirely is skipped', !kimPoints.some((p) => p.label === k3.name))
   check("other teams' sprints are not theirs", kimPoints.length === 2)
   const teamVelocity = velocity([(await sprints.get(k1.id))!], hist.tasks.filter((t) => t.teamId === kTeam.id), hist.statusEvents, hist.statuses)
   check('their points are the same rule as team velocity', teamVelocity[0].points === kimPoints[0].value,
     `${teamVelocity[0].points} vs ${kimPoints[0].value}`)
+  check('velocity sums real points, not finished tasks', teamVelocity[0].points === 5 && teamVelocity[0].tasks === 2,
+    `${teamVelocity[0].points}p · ${teamVelocity[0].tasks}`)
   check('tasks finished per sprint', boardSeries('tasks', kimP, hist).map((p) => p.value).join() === '2,0')
   check('reviews count work they reviewed, not work they own',
     boardSeries('reviewed', leeP, hist).map((p) => p.value).join() === '1,0,0')

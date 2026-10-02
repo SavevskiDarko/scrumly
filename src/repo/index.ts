@@ -17,7 +17,7 @@ export { settings, DEFAULT_SETTINGS } from './settings'
 export { backup, saveTextFile, saveBinaryFile } from './backup'
 export { boards } from './boards'
 export {
-  sprints, sprintStats, velocity, finishedIn, eventsByTask, weightOf, workingDays, addDays, nextWeekday, endOfDay,
+  sprints, sprintStats, velocity, finishedIn, eventsByTask, pointsOf, workingDays, addDays, nextWeekday, endOfDay,
 } from './sprints'
 export type { SprintStats, BurndownPoint, SprintOutcome } from './sprints'
 export { notes, NOTE_TYPES, actionOutcomes } from './notes'

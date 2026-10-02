@@ -169,17 +169,19 @@ export interface SprintStats {
   series: BurndownPoint[]
   dayIndex: number
   dayCount: number
-  /** Total points in the sprint — what the burndown counts down from. */
+  /** Total points in the sprint. */
   points: number
   pointsDone: number
+  /** What the burndown counts down: points, or tasks when nothing in the sprint is sized. */
+  burndownUnit: 'points' | 'tasks'
 }
 
 /**
- * What one task contributes to the burndown. Sizes are points; a task nobody
- * sized still has to show up, or a sprint of unsized work charts as a flat
- * zero and the line stops meaning anything.
+ * What one task is worth in points. A task nobody sized is worth nothing, the
+ * same as on Jira's velocity chart — counting it as one point quietly inflated
+ * every figure by the number of unsized tasks, so velocity read as a task count.
  */
-export const weightOf = (t: Task): number => (t.size != null && t.size > 0 ? t.size : 1)
+export const pointsOf = (t: Task): number => (t.size != null && t.size > 0 ? t.size : 0)
 
 /**
  * Everything here is replayed from statusEvents and sprintEvents rather than
@@ -233,7 +235,11 @@ export function sprintStats(
     (e) => e.fromSprintId === sprint.id && e.toSprintId !== sprint.id && e.at < closedAt,
   ).length
 
-  const totalPoints = inSprint.reduce((sum, t) => sum + weightOf(t), 0)
+  const totalPoints = inSprint.reduce((sum, t) => sum + pointsOf(t), 0)
+  // A sprint nobody sized would chart as a flat zero, so it burns down tasks instead.
+  const byPoints = totalPoints > 0
+  const weightOf = byPoints ? pointsOf : () => 1
+  const total = byPoints ? totalPoints : inSprint.length
   const days = workingDays(sprint.startDate, sprint.endDate, opts.holidays)
   const series: BurndownPoint[] = days.map((date, i) => {
     const t = Math.min(endOfDay(date), now)
@@ -250,7 +256,7 @@ export function sprintStats(
     return {
       date,
       remaining,
-      ideal: Math.round((totalPoints * (days.length - 1 - i)) / Math.max(1, days.length - 1)),
+      ideal: Math.round((total * (days.length - 1 - i)) / Math.max(1, days.length - 1)),
     }
   })
 
@@ -266,7 +272,8 @@ export function sprintStats(
     dayIndex: todayIdx === -1 ? days.length : todayIdx + 1,
     dayCount: days.length,
     points: totalPoints,
-    pointsDone: finished.reduce((sum, t) => sum + weightOf(t), 0),
+    pointsDone: finished.reduce((sum, t) => sum + pointsOf(t), 0),
+    burndownUnit: byPoints ? 'points' : 'tasks',
   }
 }
 
@@ -336,7 +343,7 @@ export function velocity(
       sprintId: sprint.id,
       name: sprint.name,
       endDate: sprint.endDate,
-      points: done.reduce((sum, t) => sum + weightOf(t), 0),
+      points: done.reduce((sum, t) => sum + pointsOf(t), 0),
       tasks: done.length,
     }
   })

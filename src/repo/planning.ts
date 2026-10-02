@@ -1,7 +1,7 @@
 import { db } from '../db/schema'
 import type { Availability, ID, Person, Sprint, Task } from '../db/types'
 import { newId } from './ids'
-import { weightOf, workingDays, type SprintOutcome } from './sprints'
+import { pointsOf, workingDays, type SprintOutcome } from './sprints'
 
 export const availability = {
   forSprint: (sprintId: ID) => db.availability.where('sprintId').equals(sprintId).toArray(),
@@ -57,7 +57,7 @@ export interface CapacityPlan {
   unassignedPoints: number
   /** Points held by someone who is no longer in this team. */
   elsewherePoints: number
-  /** Tasks with no size. Each counts as one point, same as the burndown. */
+  /** Tasks with no size. They add no points, same as velocity. */
   unsized: number
   averageVelocity: number | null
   /** Points delivered per available person-day, over the sprints the forecast reads. */
@@ -126,7 +126,7 @@ export function capacityPlan(input: {
       person,
       days,
       entered,
-      points: mine.reduce((sum, t) => sum + weightOf(t), 0),
+      points: mine.reduce((sum, t) => sum + pointsOf(t), 0),
       tasks: mine.length,
       share: forecast != null && personDays > 0 ? (forecast * days) / personDays : null,
     }
@@ -137,12 +137,12 @@ export function capacityPlan(input: {
     personDays,
     fullPersonDays: wd * members.length,
     rows,
-    plannedPoints: inSprint.reduce((sum, t) => sum + weightOf(t), 0),
+    plannedPoints: inSprint.reduce((sum, t) => sum + pointsOf(t), 0),
     plannedTasks: inSprint.length,
-    unassignedPoints: inSprint.filter((t) => !t.assigneeId).reduce((sum, t) => sum + weightOf(t), 0),
+    unassignedPoints: inSprint.filter((t) => !t.assigneeId).reduce((sum, t) => sum + pointsOf(t), 0),
     elsewherePoints: inSprint
       .filter((t) => t.assigneeId && !memberIds.has(t.assigneeId))
-      .reduce((sum, t) => sum + weightOf(t), 0),
+      .reduce((sum, t) => sum + pointsOf(t), 0),
     unsized: inSprint.filter((t) => t.size == null).length,
     averageVelocity: recent.length ? Math.round(pastPoints / recent.length) : null,
     rate,

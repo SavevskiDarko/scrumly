@@ -2,7 +2,7 @@ import { db } from '../db/schema'
 import type { Availability, ID, Kpi, KpiEntry, KpiSource, Person, Sprint, Status, StatusEvent, Task } from '../db/types'
 import { newId } from './ids'
 import { buildIndex, cycleTimeOf } from './insights'
-import { endOfDay, eventsByTask, finishedIn, weightOf } from './sprints'
+import { endOfDay, eventsByTask, finishedIn, pointsOf } from './sprints'
 
 type Better = Kpi['better']
 
@@ -13,7 +13,7 @@ export const KPI_SOURCES: Record<KpiSource, { label: string; unit: string; bette
   },
   points: {
     label: 'Points delivered per sprint', unit: 'pts', better: 'higher',
-    hint: 'Points on tasks assigned to them that finished inside a sprint. Unsized tasks count as one, same as velocity.',
+    hint: 'Points on tasks assigned to them that finished inside a sprint. Unsized tasks add nothing, same as velocity.',
   },
   tasks: {
     label: 'Tasks finished per sprint', unit: 'tasks', better: 'higher',
@@ -185,7 +185,7 @@ export function boardSeries(source: Exclude<KpiSource, 'manual'>, person: Person
     if (done.length === 0 && !wasThere) continue
 
     let value: number
-    if (source === 'points') value = done.reduce((sum, t) => sum + weightOf(t), 0)
+    if (source === 'points') value = done.reduce((sum, t) => sum + pointsOf(t), 0)
     else if (source === 'cycleTime') {
       const days = done
         .map((t) => cycleTimeOf(byTask.get(t.id) ?? [], ix))
