@@ -67,9 +67,61 @@ export interface SheetsBridge {
   openWindow(url: string): Promise<'Chrome' | 'Edge' | 'browser' | null>
   /**
    * A sheet's frame landed on Google's sign-in page, which inside a frame
-   * shows only an error. `url` is that address; its `continue` names the sheet.
+   * shows only an error — or, with `clicked`, the sheet's own Sign in button
+   * was pressed. `url` is the sign-in address; its `continue` names the sheet.
    */
-  onSignInNeeded(fn: (url: string) => void): () => void
+  onSignInNeeded(fn: (url: string, clicked: boolean) => void): () => void
+}
+
+export interface GoogleConnection {
+  /** An OAuth client has been pasted in. */
+  configured: boolean
+  /** Google has granted access, and it has not run out or been revoked. */
+  connected: boolean
+  email: string | null
+  /** False when the OS cannot encrypt the token, in which case it is never kept. */
+  encryption: boolean
+}
+
+export interface SheetTab {
+  /** Google's sheetId for the tab: the gid in a link. */
+  id: string
+  title: string
+  frozenRows: number
+}
+
+export interface SheetData {
+  title: string
+  tabs: SheetTab[]
+  /** The tab these values are from. */
+  tab: string
+  /** Rows of cells as Google displays them. Rows can be ragged, and end early. */
+  values: string[][]
+}
+
+export type GoogleResult<T> =
+  | { ok: true; status: number; data: T }
+  | { ok: false; status: number; message: string; expired?: boolean }
+
+export type GoogleClientInput = { clientId: string; clientSecret: string } | { json: string }
+
+/**
+ * Private sheets inside Scrumly through Google's API (electron/google.cjs).
+ * Consent happens in the user's own browser; the token never leaves the main
+ * process.
+ */
+export interface GoogleBridge {
+  status(): Promise<GoogleConnection>
+  /**
+   * Keeps `client` when given, then opens Google's consent page in the browser
+   * and resolves once it answers — or is cancelled, or ten minutes pass.
+   */
+  connect(client?: GoogleClientInput): Promise<{ ok: true; email: string | null } | { ok: false; message: string }>
+  cancel(): Promise<void>
+  /** Forgets the access and revokes it with Google. The client is kept. */
+  disconnect(): Promise<void>
+  /** One tab's values: the one `gid` names, or the first. */
+  read(spreadsheetId: string, gid: string | null): Promise<GoogleResult<SheetData>>
 }
 
 export interface DesktopApi {
@@ -87,6 +139,8 @@ export interface DesktopApi {
   jira?: JiraBridge
   /** Absent in desktop builds from before the Sheets screen. */
   sheets?: SheetsBridge
+  /** Absent in desktop builds from before sheets could be read through Google's API. */
+  google?: GoogleBridge
 }
 
 declare global {
@@ -111,6 +165,10 @@ export function jiraBridge(): JiraBridge | null {
 
 export function sheetsBridge(): SheetsBridge | null {
   return desktopApi()?.sheets ?? null
+}
+
+export function googleBridge(): GoogleBridge | null {
+  return desktopApi()?.google ?? null
 }
 
 /** Human-sized, for the Settings panel. Bytes are never the interesting part. */

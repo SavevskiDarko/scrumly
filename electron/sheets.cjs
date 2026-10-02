@@ -95,4 +95,15 @@ function watch(contents) {
   contents.on('did-fail-load', (_e, _code, _description, url, isMainFrame) => needed(url, isMainFrame))
 }
 
-module.exports = { isSheetUrl, pickBrowser, openWindow, watch }
+/**
+ * A sheet's own "Sign in" button, clicked inside its frame. It would open
+ * Google's sign-in in a browser tab, which signs in the browser and not
+ * Scrumly; the screen gets to say what will actually work instead.
+ */
+function signInClicked(contents, url) {
+  if (!isSignInUrl(url)) return false
+  contents.send('scrumly:sheet-needs-sign-in', url, true)
+  return true
+}
+
+module.exports = { isSignInUrl, isSheetUrl, pickBrowser, openWindow, watch, signInClicked }

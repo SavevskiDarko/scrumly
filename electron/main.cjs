@@ -30,6 +30,7 @@ app.setName('Scrumly')
 const storage = require('./storage.cjs')
 const jira = require('./jira.cjs')
 const sheets = require('./sheets.cjs')
+const google = require('./google.cjs')
 const updates = require('./updates.cjs')
 
 const DIST = path.join(__dirname, '..', 'dist')
@@ -103,6 +104,7 @@ function createWindow() {
   // Excalidraw's help links and anything else external belong in the real
   // browser; a Scrumly window that can navigate away from Scrumly is a trap.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (sheets.signInClicked(mainWindow.webContents, url)) return { action: 'deny' }
     if (/^https?:/.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
@@ -113,6 +115,7 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (e, url) => {
     if (url.startsWith(home)) return
     e.preventDefault()
+    if (sheets.signInClicked(mainWindow.webContents, url)) return
     if (/^https?:/.test(url)) void shell.openExternal(url)
   })
   sheets.watch(mainWindow.webContents)
@@ -195,6 +198,18 @@ function registerIpc() {
   // A private Google Sheet, in a window of the user's own browser, which is
   // where they are signed in to Google. Only a sheet's address is accepted.
   ipcMain.handle('scrumly:sheet-window', (_e, url) => sheets.openWindow(url))
+
+  // The same sheets inside Scrumly, through Google's API: consent once in the
+  // browser, then values by sheet id. The token stays in this process.
+  ipcMain.handle('scrumly:google-status', () => google.status())
+  ipcMain.handle('scrumly:google-connect', (_e, input) => google.connect(input, () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+  }))
+  ipcMain.handle('scrumly:google-cancel', () => google.cancel())
+  ipcMain.handle('scrumly:google-disconnect', () => google.disconnect())
+  ipcMain.handle('scrumly:google-read', (_e, spreadsheetId, gid) => google.read(spreadsheetId, gid))
 
   ipcMain.handle('scrumly:choose-dir', async () => {
     const options = {

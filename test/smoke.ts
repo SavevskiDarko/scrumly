@@ -22,6 +22,7 @@ import {
 import { pullTeam } from '../src/jira/pull'
 import type { Task } from '../src/db/types'
 import { currentScope } from '../src/repo/localOnly'
+import { buildTable, columnName, linkIn, looksNumeric, viewFor } from '../src/sheets/table'
 import { tracker } from '../src/sync/tracker'
 import { applyIncoming, keepOnThisComputer, readOutgoing, type RemoteRow } from '../src/sync/rows'
 
@@ -1244,6 +1245,67 @@ async function run() {
     && !isSheetUrl('https://example.com/') && !isSheetUrl('file:///C:/Windows/System32/calc.exe')
     && !isSheetUrl('https://docs.google.com.example.com/spreadsheets/d/x') && !isSheetUrl(undefined as never))
 
+  // A private sheet inside Scrumly: Google's API, consent given once in the browser.
+  const g = createRequire(import.meta.url)('../electron/google.cjs') as {
+    parseClient(i: unknown): { clientId: string; clientSecret: string }
+    pkce(): { verifier: string; challenge: string }
+    authUrl(o: { clientId: string; redirectUri: string; challenge: string; state: string }): string
+    emailFrom(t: string): string | null
+    explainApiError(status: number, body: unknown): string
+  }
+  const CLIENT = '123-abc.apps.googleusercontent.com'
+  check('the client comes out of the JSON Google hands out', JSON.stringify(g.parseClient({
+    json: JSON.stringify({ installed: { client_id: CLIENT, client_secret: 'GOCSPX-x', redirect_uris: ['http://localhost'] } }),
+  })) === JSON.stringify({ clientId: CLIENT, clientSecret: 'GOCSPX-x' }))
+  check('or from the two fields, trimmed', g.parseClient({ clientId: ` ${CLIENT} `, clientSecret: ' s ' }).clientSecret === 's')
+  const refusesClient = (i: unknown) => { try { g.parseClient(i); return false } catch { return true } }
+  check('a web client, a stray file, or a half-pasted one is refused with a reason',
+    refusesClient({ json: JSON.stringify({ web: { client_id: CLIENT, client_secret: 's' } }) })
+    && refusesClient({ json: 'not json' }) && refusesClient({ clientId: 'nope', clientSecret: 's' })
+    && refusesClient({ clientId: CLIENT, clientSecret: '' }))
+  const { verifier, challenge } = g.pkce()
+  const { createHash } = await import('node:crypto')
+  check('the PKCE challenge is the verifier\'s SHA-256', verifier.length >= 43
+    && challenge === createHash('sha256').update(verifier).digest('base64url'))
+  const consent = new URL(g.authUrl({ clientId: CLIENT, redirectUri: 'http://127.0.0.1:5555', challenge, state: 'st' }))
+  check('consent goes to Google, back to this machine only', consent.origin === 'https://accounts.google.com'
+    && consent.searchParams.get('redirect_uri') === 'http://127.0.0.1:5555' && consent.searchParams.get('state') === 'st'
+    && consent.searchParams.get('code_challenge_method') === 'S256' && consent.searchParams.get('access_type') === 'offline')
+  const scopes = consent.searchParams.get('scope')!.split(' ')
+  check('and asks to read spreadsheets, nothing more',
+    scopes.includes('https://www.googleapis.com/auth/spreadsheets.readonly')
+    && scopes.every((s) => s === 'openid' || s === 'email' || s.endsWith('.readonly')))
+  const idToken = `x.${Buffer.from(JSON.stringify({ email: 'me@gmail.com' })).toString('base64url')}.sig`
+  check('the account is read off the id token', g.emailFrom(idToken) === 'me@gmail.com' && g.emailFrom('garbage') === null)
+  check('a turned-off Sheets API says so plainly', /not turned on/.test(g.explainApiError(403,
+    { error: { status: 'PERMISSION_DENIED', message: 'Google Sheets API has not been used in project 1 before or it is disabled.' } })))
+  check('as does a sheet the account cannot open', /cannot open/.test(g.explainApiError(403, { error: { message: 'The caller does not have permission' } })))
+
+  const sent: unknown[][] = []
+  const fakeContents = { send: (...a: unknown[]) => { sent.push(a) } }
+  const { signInClicked } = createRequire(import.meta.url)('../electron/sheets.cjs') as { signInClicked(c: unknown, u: string): boolean }
+  check('a sheet\'s own Sign in stays in Scrumly instead of opening a browser tab',
+    signInClicked(fakeContents, 'https://accounts.google.com/ServiceLogin?continue=x') && sent[0]?.[2] === true)
+  check('every other link still goes to the browser', !signInClicked(fakeContents, 'https://example.com/') && sent.length === 1)
+
+  check('column letters run on past Z', [0, 25, 26, 51, 52, 701, 702].map(columnName).join() === 'A,Z,AA,AZ,BA,ZZ,AAA')
+  check('numbers are told from words', ['12', '-3.5', '1,234.00', '45%', '$9.99', '(120)', '1.2E+3', '12 345'].every(looksNumeric)
+    && !['Q3', '2026-09-28', 'ten', '', 'v1.2'].some(looksNumeric))
+  check('a cell that is only an address is a link', linkIn(' https://example.com/a ') === 'https://example.com/a' && linkIn('see https://x.y') === null)
+  const grid = [['Name', 'Team'], ['Ana', 'Payments'], ['Ben', 'Mobile', 'extra'], ['Cara']]
+  const all = buildTable(grid, 1)
+  check('every row gets the widest row\'s columns', all.width === 3 && all.rows.length === 4 && all.rows[0].frozen && !all.rows[1].frozen)
+  const filtered = buildTable(grid, 0, 'mob')
+  check('a filter keeps the header and the rows that match', filtered.rows.map((r) => r.index).join() === '0,2')
+  const capped = buildTable(Array.from({ length: 10 }, (_, i) => [String(i)]), 0, '', 4)
+  check('past the cap it says how many are left out', capped.rows.length === 4 && capped.hidden === 6 && capped.matched === 10)
+  const own = parseSheetUrl(`https://docs.google.com/spreadsheets/d/${FILE}/edit`)
+  check('in the browser a sheet is always the editor', viewFor({ view: 'table' }, own, { api: false, connected: false }) === 'editor')
+  check('in the app it is the table once Google is connected', viewFor({}, own, { api: true, connected: true }) === 'table'
+    && viewFor({}, own, { api: true, connected: false }) === 'editor')
+  check('a choice made by hand stands', viewFor({ view: 'editor' }, own, { api: true, connected: true }) === 'editor')
+  check('and a published sheet, which the API cannot read, is always the editor', viewFor({ view: 'table' }, pub, { api: true, connected: true }) === 'editor')
+
   const sheetTeam = await teams.create({ name: 'Sheet Team' })
   const capSheet = await sheets.add({ url: `https://docs.google.com/spreadsheets/d/${FILE}/edit#gid=0`, title: ' Capacity ', teamId: team.id })
   check('a sheet is added with its name trimmed', capSheet.ok && capSheet.sheet.title === 'Capacity')
@@ -1264,6 +1326,9 @@ async function run() {
     && (await sheets.get(capSheet.ok ? capSheet.sheet.id : ''))!.url.includes(FILE))
   await sheets.update(sharedSheet.ok ? sharedSheet.sheet.id : '', { title: 'Roadmap' })
   check('a sheet can be renamed', (await sheets.get(sharedSheet.ok ? sharedSheet.sheet.id : ''))!.title === 'Roadmap')
+  check('a new sheet has no view until one is chosen', (await sheets.get(sharedSheet.ok ? sharedSheet.sheet.id : ''))!.view === undefined)
+  await sheets.update(sharedSheet.ok ? sharedSheet.sheet.id : '', { view: 'table' })
+  check('and keeps the one chosen', (await sheets.get(sharedSheet.ok ? sharedSheet.sheet.id : ''))!.view === 'table')
   check('removing a team hands its sheets to every team', (await teams.remove(sheetTeam.id)).ok
     && (await sheets.get(other.ok ? other.sheet.id : ''))!.teamId === null)
 

@@ -30,7 +30,16 @@ contextBridge.exposeInMainWorld('scrumlyDesktop', {
   },
   sheets: {
     openWindow: (url) => ipcRenderer.invoke('scrumly:sheet-window', url),
-    onSignInNeeded: (fn) => listen('scrumly:sheet-needs-sign-in', (url) => fn(String(url))),
+    onSignInNeeded: (fn) => listen('scrumly:sheet-needs-sign-in', (url, clicked) => fn(String(url), clicked === true)),
+  },
+  // Like Jira: consent goes in through the browser, values come back, and the
+  // token never crosses over.
+  google: {
+    status: () => ipcRenderer.invoke('scrumly:google-status'),
+    connect: (client) => ipcRenderer.invoke('scrumly:google-connect', client),
+    cancel: () => ipcRenderer.invoke('scrumly:google-cancel'),
+    disconnect: () => ipcRenderer.invoke('scrumly:google-disconnect'),
+    read: (spreadsheetId, gid) => ipcRenderer.invoke('scrumly:google-read', spreadsheetId, gid),
   },
 })
 

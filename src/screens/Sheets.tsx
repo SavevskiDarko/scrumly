@@ -1,13 +1,16 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
 import type { Sheet } from '../db/types'
-import { sheetsBridge } from '../desktop/bridge'
+import { googleBridge, sheetsBridge } from '../desktop/bridge'
 import { setParam, useRoute } from '../hooks/useRoute'
 import {
   NOT_A_SHEET, browserUrl, embedUrl, parseSheetUrl, sheets as sheetRepo, signInTarget, type SheetRef,
 } from '../repo'
+import { GoogleConnect, useGoogleConnection } from '../sheets/GoogleConnect'
+import { SheetTable } from '../sheets/SheetTable'
+import { viewFor } from '../sheets/table'
 
 // Per device, like the rail: which sheet was open last, so coming back lands on it.
 const LAST_KEY = 'scrumly-sheet-last'
@@ -21,19 +24,23 @@ function writeLast(id: string) {
 
 /**
  * Which sheets Google has asked to sign in for, in the desktop app. Google
- * will not sign anyone in there, so those open in a window of the user's own
- * browser instead. The browser build has none of this: a sheet there uses
- * whatever Google account the browser itself is signed in to.
+ * will not sign anyone in there, so those show as a table through its API, or
+ * open in a window of the user's own browser. The browser build has none of
+ * this: a sheet there uses whatever Google account the browser is signed in to.
  */
-function usePrivateSheets() {
+function usePrivateSheets(currentFileId: string | null) {
   const [bridge] = useState(sheetsBridge)
   // File ids whose frame landed on Google's sign-in page.
   const [refused, setRefused] = useState<ReadonlySet<string>>(new Set())
+  const current = useRef(currentFileId)
+  current.current = currentFileId
 
   useEffect(() => {
     if (!bridge) return
-    return bridge.onSignInNeeded((url) => {
-      const fileId = signInTarget(url)
+    return bridge.onSignInNeeded((url, clicked) => {
+      // A click on the sheet's own Sign in button came from the sheet on
+      // screen, even when Google's address does not say which one it was.
+      const fileId = signInTarget(url) ?? (clicked ? current.current : null)
       if (fileId) setRefused((r) => new Set(r).add(fileId))
     })
   }, [bridge])
@@ -56,17 +63,22 @@ export function Sheets({ teamId }: { teamId: string }) {
   const route = useRoute()
   const rows = useLiveQuery(() => sheetRepo.listForTeam(teamId), [teamId])
   const team = useLiveQuery(() => db.teams.get(teamId), [teamId])
-  const priv = usePrivateSheets()
+  const [api] = useState(() => googleBridge() !== null)
+  const conn = useGoogleConnection()
+  const [connecting, setConnecting] = useState(false)
   const [editing, setEditing] = useState<Sheet | 'new' | null>(null)
   // Sheets already opened stay loaded behind the one on screen, so flipping
   // between two is instant and each keeps its place.
   const [opened, setOpened] = useState<string[]>([])
-  // Bumped to reload one sheet: a new key is a new frame.
+  // Bumped to reload one sheet: a new key is a new frame, or a new read.
   const [loads, setLoads] = useState<Record<string, number>>({})
 
   const wanted = route.params.get('sheet') ?? readLast()
   const current = rows?.find((s) => s.id === wanted) ?? rows?.[0] ?? null
   const currentRef = current ? parseSheetUrl(current.url) : null
+  const priv = usePrivateSheets(currentRef?.fileId ?? null)
+  const can = { api, connected: Boolean(conn?.connected) }
+  const view = (s: Sheet) => viewFor(s, parseSheetUrl(s.url), can)
 
   useEffect(() => {
     if (!current) return
@@ -83,7 +95,8 @@ export function Sheets({ teamId }: { teamId: string }) {
 
   if (rows === undefined) return null
 
-  const isPrivate = Boolean(priv.bridge && currentRef && priv.refused.has(currentRef.fileId))
+  const currentView = current ? view(current) : 'editor'
+  const isPrivate = Boolean(priv.bridge && currentRef && currentView === 'editor' && priv.refused.has(currentRef.fileId))
 
   return (
     <>
@@ -91,6 +104,11 @@ export function Sheets({ teamId }: { teamId: string }) {
         <h1>Sheets</h1>
         <span className="chip solid">{rows.length}</span>
         <span className="spacer" />
+        {api && conn && (conn.connected
+          ? <button className="chip ok btn-like" title="Private sheets show here through Google's API" onClick={() => setConnecting(true)}>
+            Google: {conn.email ?? 'connected'}
+          </button>
+          : <button className="btn" onClick={() => setConnecting(true)}>Connect Google</button>)}
         <button className="btn primary" onClick={() => setEditing('new')}>Add sheet</button>
       </div>
 
@@ -104,8 +122,8 @@ export function Sheets({ teamId }: { teamId: string }) {
               <button className="btn primary" onClick={() => setEditing('new')}>Add a Google Sheet</button>
             </div>
             <p className="small" style={{ marginTop: 14 }}>
-              {priv.bridge
-                ? 'Sheets shared with "anyone with the link" open right here. Private ones open in a window of your own Chrome or Edge, where you are already signed in to Google.'
+              {api
+                ? 'Sheets shared with "anyone with the link" open right here in Google\'s editor. Private ones show here as a table once you Connect Google.'
                 : 'Private sheets open with the Google account this browser is signed in to.'}
             </p>
           </div>
@@ -130,6 +148,14 @@ export function Sheets({ teamId }: { teamId: string }) {
             <span className="spacer" />
             {current && currentRef && (
               <div className="sheet-actions">
+                {api && !currentRef.published && (
+                  <div className="seg sm" title="Google's editor, or the sheet's values read into a table — the way a private sheet shows here">
+                    <button className={currentView === 'editor' ? 'on' : ''}
+                      onClick={() => sheetRepo.update(current.id, { view: 'editor' })}>Google editor</button>
+                    <button className={currentView === 'table' ? 'on' : ''}
+                      onClick={() => sheetRepo.update(current.id, { view: 'table' })}>Table</button>
+                  </div>
+                )}
                 <button className="btn ghost sm" title="Load the sheet again from Google" onClick={() => {
                   priv.forget(currentRef.fileId)
                   setLoads((l) => ({ ...l, [current.id]: (l[current.id] ?? 0) + 1 }))
@@ -144,7 +170,7 @@ export function Sheets({ teamId }: { teamId: string }) {
           </div>
 
           <div className="sheet-stage">
-            {rows.filter((s) => opened.includes(s.id)).map((s) => {
+            {rows.filter((s) => opened.includes(s.id) && view(s) === 'editor').map((s) => {
               const ref = parseSheetUrl(s.url)
               if (!ref) return null
               return (
@@ -160,19 +186,29 @@ export function Sheets({ teamId }: { teamId: string }) {
             {current && !currentRef && (
               <div className="sheet-cover"><div className="empty"><strong>That link no longer reads as a sheet</strong>{NOT_A_SHEET}</div></div>
             )}
-            {isPrivate && currentRef && (
+            {current && currentRef && currentView === 'table' && (
+              <SheetTable
+                key={`${current.id}:${current.url}`}
+                sheetRef={currentRef}
+                connected={can.connected}
+                reload={loads[current.id] ?? 0}
+                onConnect={() => setConnecting(true)}
+              />
+            )}
+            {isPrivate && currentRef && current && (
               <div className="sheet-cover">
                 <div className="empty">
                   <strong>This sheet is private</strong>
                   Google only shows it to an account that can open it, and does not let anyone sign in inside a
-                  desktop app. It opens in a window of your own Chrome or Edge instead, where you are already
-                  signed in.
-                  <div style={{ marginTop: 14 }}>
-                    <button className="btn primary" onClick={() => openWindow(currentRef)}>Open in window</button>
+                  desktop app. {can.connected
+                    ? 'Your Google connection can show it here as a table.'
+                    : 'Connect Google once, through your browser, and it shows here as a table.'}
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 14 }}>
+                    {can.connected
+                      ? <button className="btn primary" onClick={() => sheetRepo.update(current.id, { view: 'table' })}>Show it here</button>
+                      : api && <button className="btn primary" onClick={() => setConnecting(true)}>Connect Google</button>}
+                    <button className="btn" onClick={() => openWindow(currentRef)}>Open in window</button>
                   </div>
-                  <p className="small" style={{ marginTop: 14 }}>
-                    Shared as "anyone with the link", it would open right here.
-                  </p>
                 </div>
               </div>
             )}
@@ -189,6 +225,7 @@ export function Sheets({ teamId }: { teamId: string }) {
           onSaved={(id) => { setEditing(null); setParam('sheet', id) }}
         />
       )}
+      {connecting && <GoogleConnect onClose={() => setConnecting(false)} />}
     </>
   )
 }

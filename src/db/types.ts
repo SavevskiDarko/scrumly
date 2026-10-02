@@ -294,4 +294,13 @@ export interface Sheet {
   /** Null shows it whichever team is open. */
   teamId: ID | null
   createdAt: number
+  /**
+   * How the desktop app shows it: Google's own editor in a frame, or its values
+   * read through Google's API into a table — the one way a private sheet shows
+   * inside the app. Absent until chosen: the table once Google is connected,
+   * the editor before. The browser always uses the editor.
+   */
+  view?: SheetView
 }
+
+export type SheetView = 'editor' | 'table'

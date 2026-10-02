@@ -211,19 +211,44 @@ away. A private one opens only for a Google account that can see it.
   regardless, and the next release took both out again. Getting round that check is not
   something Scrumly does
 
-So in the desktop app a private sheet opens in a window of your own Chrome
-— Edge if Chrome is not installed, or if Edge is your default browser — in
-app mode: no tabs, no address bar, the real editor, and the account you are
-already signed in with there, company single sign-on included
-(`electron/sheets.cjs`). Scrumly starts the window and sees nothing of it
-after that. Open in window on the toolbar does the same for any sheet.
+What Google does allow a desktop app is its API, so that is how a private
+sheet shows inside Scrumly: **Connect Google** on the Sheets screen
+(`electron/google.cjs`).
 
-Inside a frame, Google's sign-in page shows only "401. That's an error.", so
-a sheet whose frame lands there is covered with a note and the Open in window
-button instead. The sign-in address names the sheet it would continue to,
-which is how the right one is covered. Docs' own inner frames brush past the
-sign-in page on every sheet, public ones too, which is why landing there is
-what counts, and only a sheet's own address does.
+- **Consent happens in your own browser, once.** Google's permission page
+  opens there; Allow, and the browser hands a one-time code back to a
+  listener on 127.0.0.1 (PKCE). Scrumly never sees the password. It asks for
+  read-only access to spreadsheets and the account's address, nothing else
+- **The token stays in the main process,** encrypted with the OS (DPAPI on
+  Windows) into userData beside Jira's — never the database, the data file,
+  a backup, or sync. The renderer asks for a sheet's values by its id and
+  gets values back
+- **It needs an OAuth client of your own,** made once in Google Cloud; the
+  Connect Google dialog walks through it. Publish the app to In production:
+  left in Testing, Google expires the access every seven days. Google then
+  warns at consent that it has not verified the app — it is yours, so
+  Advanced → Go to Scrumly
+- **The sheet is a table,** not Google's editor: the values as Google
+  displays them, each tab, the first frozen row pinned, a row filter, and a
+  fresh read every minute while it is on screen. Read-only. Two thousand rows
+  are drawn at most; the filter reaches the rest
+
+Each sheet has a **Google editor / Table** switch. Until one is picked, a
+sheet is the table once Google is connected and the editor before; the
+browser build is always the editor, and so is a published sheet, which the
+API cannot read. **Open in window** puts any sheet in a window of your own
+Chrome — Edge if Chrome is not installed, or if Edge is your default browser
+— in app mode, with the real editor and the account already signed in there
+(`electron/sheets.cjs`).
+
+In the editor, a private sheet's frame shows Google's own sign-in prompt, or
+on Google's sign-in page only "401. That's an error.". Either way the sheet
+is covered with a note offering the table or the window: its Sign in button
+is caught before it can open a browser tab, and a frame landing on the
+sign-in page is noticed. The sign-in address names the sheet it would
+continue to, which is how the right one is covered. Docs' own inner frames
+brush past the sign-in page on every sheet, public ones too, which is why
+landing there is what counts, and only a sheet's own address does.
 
 ## Dates
 

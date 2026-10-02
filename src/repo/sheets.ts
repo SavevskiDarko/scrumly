@@ -1,5 +1,5 @@
 import { db } from '../db/schema'
-import type { ID, Sheet } from '../db/types'
+import type { ID, Sheet, SheetView } from '../db/types'
 import { newId } from './ids'
 
 /*
@@ -126,7 +126,7 @@ export const sheets = {
     return { ok: true, sheet: row }
   },
 
-  async update(id: ID, patch: { title?: string; url?: string; teamId?: ID | null }): Promise<{ ok: boolean; reason?: string }> {
+  async update(id: ID, patch: { title?: string; url?: string; teamId?: ID | null; view?: SheetView }): Promise<{ ok: boolean; reason?: string }> {
     const changes: Partial<Sheet> = {}
     if (patch.url !== undefined) {
       const ref = parseSheetUrl(patch.url)
@@ -135,6 +135,7 @@ export const sheets = {
     }
     if (patch.title !== undefined) changes.title = patch.title.trim() || 'Untitled sheet'
     if (patch.teamId !== undefined) changes.teamId = patch.teamId
+    if (patch.view !== undefined) changes.view = patch.view
     await db.sheets.update(id, changes)
     return { ok: true }
   },
