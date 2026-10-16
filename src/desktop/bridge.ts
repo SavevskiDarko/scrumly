@@ -132,6 +132,8 @@ export interface AssistantConnection {
   encryption: boolean
   /** The model every request goes to. Fixed in the main process. */
   model: string
+  /** The workspace named on every request, for a key that belongs to none. Absent before 0.3.14. */
+  workspace?: string | null
 }
 
 /** What the renderer decides: everything else about a request is fixed in electron/assistant.cjs. */
@@ -149,7 +151,11 @@ export type AssistantResult =
 /** Claude, through the main process (electron/assistant.cjs). The key never crosses over. */
 export interface AssistantBridge {
   status(): Promise<AssistantConnection>
-  connect(input: { apiKey: string }): Promise<{ ok: true } | { ok: false; message: string }>
+  /**
+   * `workspaceId` only for a key made outside any workspace; `needsWorkspace`
+   * says Anthropic refused the key for the want of one.
+   */
+  connect(input: { apiKey: string; workspaceId?: string }): Promise<{ ok: true } | { ok: false; message: string; needsWorkspace?: boolean }>
   /** Forgets the key, and stops anything still running. */
   disconnect(): Promise<void>
   /** One turn. Its text arrives through onText, tagged with `requestId`, while this is pending. */

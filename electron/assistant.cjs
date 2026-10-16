@@ -19,7 +19,7 @@ const { app, net, safeStorage } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const {
-  Anthropic, APIConnectionError, APIError, APIUserAbortError, AuthenticationError,
+  Anthropic, APIConnectionError, APIError, APIUserAbortError, AuthenticationError, BadRequestError,
   InternalServerError, NotFoundError, PermissionDeniedError, RateLimitError,
 } = require('@anthropic-ai/sdk')
 
@@ -37,9 +37,15 @@ function keyPath() {
   return path.join(app.getPath('userData'), FILE)
 }
 
-async function readKey() {
+/** The key, and the workspace to name with it when the key belongs to none. */
+async function readCredentials() {
   try {
-    return safeStorage.decryptString(await fs.readFile(keyPath())) || null
+    const text = safeStorage.decryptString(await fs.readFile(keyPath()))
+    if (!text) return null
+    // 0.3.13 stored the bare key.
+    if (!text.startsWith('{')) return { apiKey: text, workspaceId: null }
+    const creds = JSON.parse(text)
+    return creds && creds.apiKey ? { apiKey: creds.apiKey, workspaceId: creds.workspaceId || null } : null
   } catch {
     return null
   }
@@ -50,8 +56,25 @@ async function readKey() {
  * rest of Windows does — the difference between working and not on a company
  * laptop.
  */
-function client(apiKey) {
-  return new Anthropic({ apiKey, fetch: (url, init) => net.fetch(url, init) })
+function client({ apiKey, workspaceId }) {
+  return new Anthropic({
+    apiKey,
+    // A key made outside any workspace has to say which one to use on every
+    // request; one made inside a workspace must not.
+    defaultHeaders: workspaceId ? { 'anthropic-workspace-id': workspaceId } : undefined,
+    fetch: (url, init) => net.fetch(url, init),
+  })
+}
+
+/** What Anthropic said, without the status code and raw JSON wrapped round it. */
+function said(err) {
+  const body = err && err.error && err.error.error
+  return (body && typeof body.message === 'string' && body.message) || (err && err.message) || String(err)
+}
+
+/** Anthropic refusing a key that belongs to no workspace because none was named. */
+function needsWorkspace(err) {
+  return err instanceof BadRequestError && /anthropic-workspace-id|scoped to a workspace/i.test(said(err))
 }
 
 /**
@@ -66,17 +89,19 @@ function explain(err) {
   if (err instanceof RateLimitError) return { error: 'Anthropic asked Scrumly to slow down — try again in a minute' }
   if (err instanceof InternalServerError) return { error: 'Claude is busy or having trouble — try again in a moment' }
   if (err instanceof APIConnectionError) return { error: 'Could not reach Anthropic — check the connection' }
-  if (err instanceof APIError) return { error: `Anthropic answered ${err.status ?? 'with an error'}: ${err.message}` }
+  if (err instanceof APIError) return { error: `Anthropic answered ${err.status ?? 'with an error'}: ${said(err)}` }
   // Not an answer from the API: a reply that could not be read, which asking
   // again usually fixes.
   return { error: 'Claude\'s reply could not be read', retry: true }
 }
 
 async function status() {
+  const creds = await readCredentials()
   return {
-    connected: Boolean(await readKey()),
+    connected: Boolean(creds),
     encryption: safeStorage.isEncryptionAvailable(),
     model: MODEL,
+    workspace: creds ? creds.workspaceId : null,
   }
 }
 
@@ -86,14 +111,25 @@ async function connect(input) {
     return { ok: false, message: 'This computer cannot encrypt the key, so Scrumly will not store it' }
   }
   const apiKey = String((input && input.apiKey) || '').trim()
+  const workspaceId = String((input && input.workspaceId) || '').trim() || null
   if (!apiKey) return { ok: false, message: 'Paste the API key' }
+  const creds = { apiKey, workspaceId }
   try {
-    await client(apiKey).models.retrieve(MODEL)
+    await client(creds).models.retrieve(MODEL)
   } catch (err) {
+    if (needsWorkspace(err)) {
+      return {
+        ok: false,
+        needsWorkspace: true,
+        message: workspaceId
+          ? `Anthropic would not use that workspace with this key: ${said(err)}`
+          : 'This key is not tied to a workspace, so Anthropic needs to be told which one to use',
+      }
+    }
     return { ok: false, message: err instanceof AuthenticationError ? 'Anthropic did not accept that key' : explain(err).error }
   }
   await fs.mkdir(app.getPath('userData'), { recursive: true })
-  await fs.writeFile(keyPath(), safeStorage.encryptString(apiKey))
+  await fs.writeFile(keyPath(), safeStorage.encryptString(JSON.stringify(creds)))
   return { ok: true }
 }
 
@@ -107,13 +143,13 @@ async function disconnect() {
  * result is the whole message, or a sentence saying why there is none.
  */
 async function send(requestId, request, onText) {
-  const apiKey = await readKey()
-  if (!apiKey) return { ok: false, error: 'Connect an Anthropic API key in Settings first' }
+  const creds = await readCredentials()
+  if (!creds) return { ok: false, error: 'Connect an Anthropic API key in Settings first' }
   if (!request || typeof request.system !== 'string' || !Array.isArray(request.messages) || !Array.isArray(request.tools)) {
     return { ok: false, error: 'Scrumly sent the assistant a malformed request' }
   }
 
-  const stream = client(apiKey).beta.messages.stream({
+  const stream = client(creds).beta.messages.stream({
     model: MODEL,
     max_tokens: MAX_TOKENS,
     thinking: { type: 'adaptive' },

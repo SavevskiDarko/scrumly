@@ -624,7 +624,10 @@ opens it beside whatever screen is open.
   token — never the database, the data file, a backup or sync, and never
   handed back to the renderer. `electron/assistant.cjs` fixes the model
   (Claude Opus 5.5), thinking and limits; the renderer only decides what to
-  say. Requests go through Electron's own fetch, so they use the system proxy
+  say. Requests go through Electron's own fetch, so they use the system proxy.
+  A key made outside any workspace has to name one on every request, so
+  when Anthropic says so, Connect asks for the workspace ID and keeps it
+  with the key
 - **It reads, it does not write.** The first message of a conversation
   carries the open team's board: columns, people, sprints with burndown and
   velocity, open work, blockers, your follow-ups and the last stand-up

@@ -6,10 +6,14 @@ import { teams as teamRepo } from '../repo'
 import { useAssistant } from './AssistantProvider'
 
 const KEYS_PAGE = 'https://console.anthropic.com/settings/keys'
+const WORKSPACES_PAGE = 'https://console.anthropic.com/settings/workspaces'
 
 function Connect({ onDone }: { onDone: () => Promise<void> }) {
   const { bridge } = useAssistant()
   const [apiKey, setApiKey] = useState('')
+  const [workspaceId, setWorkspaceId] = useState('')
+  // Only some keys need it, so it stays out of the way until Anthropic asks.
+  const [askWorkspace, setAskWorkspace] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -17,10 +21,15 @@ function Connect({ onDone }: { onDone: () => Promise<void> }) {
     e.preventDefault()
     setBusy(true)
     setError(null)
-    const r = await bridge!.connect({ apiKey })
+    const r = await bridge!.connect({ apiKey, workspaceId: askWorkspace ? workspaceId : undefined })
     setBusy(false)
-    if (!r.ok) { setError(r.message); return }
+    if (!r.ok) {
+      setError(r.message)
+      if (r.needsWorkspace) setAskWorkspace(true)
+      return
+    }
     setApiKey('')
+    setWorkspaceId('')
     await onDone()
   }
 
@@ -28,6 +37,16 @@ function Connect({ onDone }: { onDone: () => Promise<void> }) {
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 420 }}>
       <input className="input" type="password" placeholder="Anthropic API key (sk-ant-…)" value={apiKey}
         onChange={(e) => setApiKey(e.target.value)} autoComplete="off" />
+      {askWorkspace && (
+        <>
+          <input className="input" placeholder="Workspace ID (wrkspc_…)" value={workspaceId} autoFocus
+            onChange={(e) => setWorkspaceId(e.target.value)} autoComplete="off" spellCheck={false} />
+          <p className="small faint" style={{ margin: 0 }}>
+            Copy it from <a href={WORKSPACES_PAGE} target="_blank" rel="noreferrer">Claude Console → Settings →
+            Workspaces</a>. Or leave this empty and use a key made inside a workspace instead.
+          </p>
+        </>
+      )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <button className="btn primary" disabled={busy || !apiKey.trim()}>{busy ? 'Checking with Anthropic…' : 'Connect'}</button>
         {error && <span className="small" style={{ color: 'var(--alert)' }}>{error}</span>}
@@ -83,7 +102,9 @@ export function AssistantSettings() {
         </>
       ) : (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span className="muted">Claude Opus 5.5, with your Anthropic API key.</span>
+          <span className="muted">
+            Claude Opus 5.5, with your Anthropic API key{connection.workspace ? ` in workspace ${connection.workspace}` : ''}.
+          </span>
           <span className="spacer" />
           <button className="btn sm" onClick={() => setOpen(true)}>Open (Ctrl+J)</button>
           <button className="btn ghost sm" onClick={async () => {
