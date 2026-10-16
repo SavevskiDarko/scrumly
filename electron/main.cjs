@@ -31,6 +31,7 @@ const storage = require('./storage.cjs')
 const jira = require('./jira.cjs')
 const sheets = require('./sheets.cjs')
 const google = require('./google.cjs')
+const assistant = require('./assistant.cjs')
 const updates = require('./updates.cjs')
 
 const DIST = path.join(__dirname, '..', 'dist')
@@ -210,6 +211,16 @@ function registerIpc() {
   ipcMain.handle('scrumly:google-cancel', () => google.cancel())
   ipcMain.handle('scrumly:google-disconnect', () => google.disconnect())
   ipcMain.handle('scrumly:google-read', (_e, spreadsheetId, gid) => google.read(spreadsheetId, gid))
+
+  // The assistant: the key goes in through connect and never comes back out.
+  // A request streams its text to the window that asked, tagged with its id.
+  ipcMain.handle('scrumly:assistant-status', () => assistant.status())
+  ipcMain.handle('scrumly:assistant-connect', (_e, input) => assistant.connect(input))
+  ipcMain.handle('scrumly:assistant-disconnect', () => assistant.disconnect())
+  ipcMain.handle('scrumly:assistant-send', (e, requestId, request) => assistant.send(requestId, request, (text) => {
+    if (!e.sender.isDestroyed()) e.sender.send('scrumly:assistant-text', requestId, text)
+  }))
+  ipcMain.handle('scrumly:assistant-cancel', (_e, requestId) => assistant.cancel(requestId))
 
   ipcMain.handle('scrumly:choose-dir', async () => {
     const options = {

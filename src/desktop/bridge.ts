@@ -1,3 +1,4 @@
+import type Anthropic from '@anthropic-ai/sdk'
 import type { Snapshot } from '../repo/backup'
 
 /**
@@ -124,6 +125,39 @@ export interface GoogleBridge {
   read(spreadsheetId: string, gid: string | null): Promise<GoogleResult<SheetData>>
 }
 
+export interface AssistantConnection {
+  /** An API key has been checked with Anthropic and stored. */
+  connected: boolean
+  /** False when the OS cannot encrypt the key, in which case it is never kept. */
+  encryption: boolean
+  /** The model every request goes to. Fixed in the main process. */
+  model: string
+}
+
+/** What the renderer decides: everything else about a request is fixed in electron/assistant.cjs. */
+export interface AssistantRequest {
+  system: string
+  tools: Anthropic.Beta.BetaToolUnion[]
+  messages: Anthropic.Beta.BetaMessageParam[]
+}
+
+export type AssistantResult =
+  | { ok: true; reply: Anthropic.Beta.BetaMessage }
+  /** `retry`: the reply could not be read, and asking again usually works. */
+  | { ok: false; error: string; aborted?: boolean; retry?: boolean }
+
+/** Claude, through the main process (electron/assistant.cjs). The key never crosses over. */
+export interface AssistantBridge {
+  status(): Promise<AssistantConnection>
+  connect(input: { apiKey: string }): Promise<{ ok: true } | { ok: false; message: string }>
+  /** Forgets the key, and stops anything still running. */
+  disconnect(): Promise<void>
+  /** One turn. Its text arrives through onText, tagged with `requestId`, while this is pending. */
+  send(requestId: string, request: AssistantRequest): Promise<AssistantResult>
+  cancel(requestId: string): Promise<void>
+  onText(fn: (requestId: string, text: string) => void): () => void
+}
+
 export interface DesktopApi {
   version: string
   info(): Promise<DesktopInfo>
@@ -141,6 +175,8 @@ export interface DesktopApi {
   sheets?: SheetsBridge
   /** Absent in desktop builds from before sheets could be read through Google's API. */
   google?: GoogleBridge
+  /** Absent in desktop builds from before the assistant. */
+  assistant?: AssistantBridge
 }
 
 declare global {
@@ -148,6 +184,11 @@ declare global {
     scrumlyDesktop?: DesktopApi
     /** Set by the store so the main process can force a flush before quitting. */
     __scrumlyFlush?: () => Promise<void>
+    /**
+     * A stand-in for the assistant's bridge, set from the console to work on
+     * its panel in the browser dev server. Read only in development builds.
+     */
+    __scrumlyAssistantBridge?: AssistantBridge
   }
 }
 
@@ -169,6 +210,12 @@ export function sheetsBridge(): SheetsBridge | null {
 
 export function googleBridge(): GoogleBridge | null {
   return desktopApi()?.google ?? null
+}
+
+export function assistantBridge(): AssistantBridge | null {
+  const real = desktopApi()?.assistant
+  if (real) return real
+  return import.meta.env?.DEV && typeof window !== 'undefined' ? window.__scrumlyAssistantBridge ?? null : null
 }
 
 /** Human-sized, for the Settings panel. Bytes are never the interesting part. */

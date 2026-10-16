@@ -32,7 +32,7 @@ export interface LocalScope {
 }
 
 /** The tables the rules below read, in the order they need them. */
-const SCOPED_TABLES = [
+export const SCOPED_TABLES = [
   'teams', 'people', 'sprints', 'tasks', 'statusEvents', 'sprintEvents', 'externalLinks', 'taskLinks',
   'blockers', 'chases', 'availability', 'standups', 'standupNotes', 'piObjectives', 'piVotes',
   'notes', 'followUps', 'conversions', 'boardLinks', 'kpis', 'kpiEntries', 'sheets',

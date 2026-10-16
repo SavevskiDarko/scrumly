@@ -37,6 +37,12 @@ export interface Team {
    * Absent on every team nobody has asked that of.
    */
   localOnly?: boolean
+  /**
+   * A team kept on this computer only may still be read by the assistant, which
+   * sends what it reads to Anthropic — but only once this is set, on purpose,
+   * per team (src/assistant/sight.ts). Meaningless on a team that travels.
+   */
+  assistant?: boolean
 }
 
 /**

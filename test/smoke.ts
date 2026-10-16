@@ -25,6 +25,11 @@ import { currentScope } from '../src/repo/localOnly'
 import { buildTable, columnName, linkIn, looksNumeric, viewFor } from '../src/sheets/table'
 import { tracker } from '../src/sync/tracker'
 import { applyIncoming, keepOnThisComputer, readOutgoing, type RemoteRow } from '../src/sync/rows'
+import { sight } from '../src/assistant/sight'
+import { teamReport } from '../src/assistant/context'
+import { runTool } from '../src/assistant/tools'
+import { Conversation, echoable } from '../src/assistant/conversation'
+import type { AssistantBridge, AssistantRequest } from '../src/desktop/bridge'
 
 let failures = 0
 function check(label: string, cond: boolean, extra = '') {
@@ -1686,6 +1691,111 @@ async function run() {
   await applyIncoming(cloud, true)
   check('taking the synced copy wholesale keeps what stays here', !!(await db.teams.get(jTeam.id))
     && (await tasks.listForTeam(jTeam.id)).length === kTasks.length && (await tasks.get(homeTask.id))?.title === 'Side project')
+
+  // The assistant: what it may read, and that it only ever proposes.
+  const seen = await sight()
+  check('the assistant cannot see a team kept on this computer', !seen.teams.some((x) => x.id === jTeam.id)
+    && seen.closed.some((x) => x.id === jTeam.id) && !seen.sees('tasks', pay2.id) && !seen.sees('people', ben!.id))
+  check('but does see someone who is also in a team it can read', seen.sees('people', both.id))
+  const homeReport = await teamReport(home, seen)
+  check('its snapshot of another team carries none of that one', homeReport.includes('Side project')
+    && !homeReport.includes('PAY-') && !homeReport.includes('Ben Builder') && !homeReport.includes('Waiting on the bank'), homeReport)
+  const atHome = { activeTeamId: home.id }
+  const hiddenTask = await runTool('read_task', { key: 'PAY-2' }, atHome)
+  check('nor can it read one of its tasks by key', hiddenTask.kind === 'result' && hiddenTask.error === true, JSON.stringify(hiddenTask))
+  const hiddenTeam = await runTool('read_team', { team: jTeam.name }, atHome)
+  check('or the team by name', hiddenTeam.kind === 'result' && !!hiddenTeam.error && /computer only/.test(hiddenTeam.text))
+
+  const newTask = await runTool('create_task', { title: 'Write the runbook', assignee: 'both', priority: 'high' }, atHome)
+  check('a change comes back as a proposal, and changes nothing yet',
+    newTask.kind === 'proposal' && (await tasks.listForTeam(home.id)).length === 1, JSON.stringify(newTask))
+  const created = newTask.kind === 'proposal' ? await newTask.proposal.apply() : ''
+  const runbook = (await tasks.listForTeam(home.id)).find((x) => x.title === 'Write the runbook')
+  check('applying it goes through the repo', !!runbook && runbook.assigneeId === both.id && runbook.priority === 'high'
+    && (await tasks.history(runbook.id)).length === 1 && created.includes(runbook.key), created)
+  const nobody = await runTool('update_task', { key: homeTask.key, assignee: 'Nobody Here' }, atHome)
+  check('a name it cannot match goes back to it rather than being guessed',
+    nobody.kind === 'result' && !!nobody.error && /No person called/.test(nobody.text), JSON.stringify(nobody))
+  const badDate = await runTool('add_follow_up', { title: 'Check in', due_date: '2026-02-31' }, atHome)
+  check('and so does a date that does not exist', badDate.kind === 'result' && !!badDate.error)
+
+  await teams.setAssistant(jTeam.id, true)
+  const opened = await sight()
+  check('allowing a team lets the assistant read it', opened.teams.some((x) => x.id === jTeam.id) && opened.sees('tasks', pay2.id))
+  check('without letting it travel anywhere else',
+    (await db.teams.get(jTeam.id))!.localOnly === true && (await currentScope()).has('tasks', pay2.id))
+  const payReport = await teamReport((await db.teams.get(jTeam.id))!, opened)
+  check('its snapshot has the work and the blocker', payReport.includes('PAY-2') && payReport.includes('Waiting on the bank'), payReport)
+  const atWork = { activeTeamId: jTeam.id }
+  const payNow = (await tasks.get(pay2.id))!
+  const elsewhere = (await db.statuses.toArray()).find((s) => s.id !== payNow.statusId)!
+  const jiraMove = await runTool('move_task', { key: 'PAY-2', column: elsewhere.name }, atWork)
+  check('it will not move a Jira issue, which the next pull would undo',
+    jiraMove.kind === 'result' && !!jiraMove.error && /Jira/.test(jiraMove.text), JSON.stringify(jiraMove))
+  const reviewPick = await runTool('update_task', { key: 'pay-2', reviewer: 'Ana' }, atWork)
+  check('but will propose a reviewer, which is Scrumly\'s own', reviewPick.kind === 'proposal', JSON.stringify(reviewPick))
+  if (reviewPick.kind === 'proposal') await reviewPick.proposal.apply()
+  check('and applying sets it', (await tasks.get(pay2.id))!.reviewerId === anaJ.id)
+  await teams.setAssistant(jTeam.id, false)
+  check('and taking it back hides it again', !(await sight()).sees('tasks', pay2.id))
+
+  const echoed = echoable([
+    { type: 'thinking', thinking: '', signature: 's' }, { type: 'text', text: 'Partial' },
+    { type: 'tool_use', id: 'x', name: 'read_team', input: {} }, { type: 'fallback', from: { model: 'a' }, to: { model: 'b' } },
+    { type: 'text', text: 'Rest' }, { type: 'tool_use', id: 'y', name: 'read_team', input: {} },
+  ] as never)
+  check('after a fallback, only the text from before the switch is sent back',
+    JSON.stringify(echoed.map((b) => b.type)) === '["text","text","tool_use"]' && (echoed[2] as { id: string }).id === 'y')
+
+  // The whole loop, against a stand-in for Claude: read, propose two, apply one.
+  const toClaude: AssistantRequest[] = []
+  const script = [
+    { stop_reason: 'tool_use', content: [{ type: 'text', text: 'Looking.' }, { type: 'tool_use', id: 'tu1', name: 'read_team', input: {} }] },
+    {
+      stop_reason: 'tool_use', content: [
+        { type: 'tool_use', id: 'tu2', name: 'add_follow_up', input: { title: 'Ask about the runbook' } },
+        { type: 'tool_use', id: 'tu3', name: 'add_follow_up', input: { title: 'Never mind this one' } },
+      ],
+    },
+    { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Added the first one.' }] },
+  ]
+  let onText: ((id: string, text: string) => void) | null = null
+  const stand: AssistantBridge = {
+    status: async () => ({ connected: true, encryption: true, model: 'test' }),
+    connect: async () => ({ ok: true as const }),
+    disconnect: async () => {},
+    cancel: async () => {},
+    onText: (fn) => { onText = fn; return () => { onText = null } },
+    send: async (id, request) => {
+      toClaude.push(structuredClone(request))
+      const next = script.shift()!
+      for (const b of next.content) if (b.type === 'text') onText?.(id, (b as { text: string }).text)
+      return { ok: true, reply: { id: 'msg', type: 'message', role: 'assistant', model: 'test', usage: {}, ...next } as never }
+    },
+  }
+  const convo = new Conversation(stand, async () => home.id)
+  const asking = convo.send('Who should I chase?')
+  for (let i = 0; i < 200 && convo.get().phase !== 'waiting'; i++) await new Promise((r) => setTimeout(r, 5))
+  const asked = convo.get().items.filter((x) => x.kind === 'proposal')
+  check('the loop reads, then waits on the user', convo.get().phase === 'waiting' && toClaude.length === 2 && asked.length === 2
+    && convo.get().items.some((x) => x.kind === 'activity'))
+  check('the first message carries the open team\'s board',
+    JSON.stringify(toClaude[0].messages[0]).includes('<board>') && JSON.stringify(toClaude[0].messages[0]).includes('Side project'))
+  check('nothing is added before the user decides', !(await followUps.listOpen()).some((f) => f.title === 'Ask about the runbook'))
+  await convo.decide(asked[0].id, 'apply')
+  await convo.decide(asked[1].id, 'skip')
+  await asking
+  const openNow = (await followUps.listOpen()).map((f) => f.title)
+  check('apply adds one, skip adds nothing', openNow.includes('Ask about the runbook') && !openNow.includes('Never mind this one'))
+  const third = toClaude[2].messages
+  const answers = third[third.length - 1].content as { tool_use_id: string; content: string }[]
+  check('Claude is told what was applied and what was skipped, in one message', answers.length === 2
+    && answers[0].tool_use_id === 'tu2' && answers[0].content.startsWith('Applied') && answers[1].content.includes('chose not'))
+  check('the history only ever grows', toClaude[1].messages.length === 3 && third.length === 5
+    && JSON.stringify(third.slice(0, 3)) === JSON.stringify(toClaude[1].messages))
+  check('and the reply ends the turn', convo.get().phase === 'idle' && convo.get().items.at(-1)?.kind === 'assistant')
+  convo.reset()
+  check('a new conversation starts empty', convo.get().items.length === 0)
 
   await keepOnThisComputer(jTeam.id, false)
   check('letting it go queues all of it to be sent again',

@@ -340,9 +340,10 @@ installer. Only a `v*` tag makes a release Latest, so a build run by hand
 from the Actions tab is a test build that installed apps never see. To
 ship: bump the version, push, then push a `vX.Y.Z` tag.
 
-`electron-updater` is the only entry in `dependencies`, and that is on
-purpose. It is the one package the packaged main process `require()`s;
-everything else is bundled into `dist/` by Vite, so it sits in
+`electron-updater` and `@anthropic-ai/sdk` are the only entries in
+`dependencies`, and that is on purpose. They are the packages the packaged
+main process `require()`s; everything else is bundled into `dist/` by Vite,
+so it sits in
 `devDependencies` where `electron-builder` leaves it out of the app.
 Moving a renderer library back into `dependencies` would ship it twice
 and add megabytes (Excalidraw alone is most of them).
@@ -609,6 +610,45 @@ Copies made before it was turned on are not touched: backups already
 exported, earlier days under `history/`, and anything already committed.
 Someone who is also in a team that syncs travels with that team, carrying
 the Jira account id an import matched them to.
+
+## Assistant
+
+Claude, inside Scrumly: ask what to focus on today, how the sprint is
+tracking, who to chase, or for help with planning, reviews and retros.
+Settings → Assistant, in the desktop app, with an Anthropic API key of your
+own (billed to that account). Ctrl+J, or Assistant at the foot of the rail,
+opens it beside whatever screen is open.
+
+- **Desktop only, like Jira.** The key is checked with Anthropic, then
+  encrypted with the OS (DPAPI on Windows) into userData next to Jira's
+  token — never the database, the data file, a backup or sync, and never
+  handed back to the renderer. `electron/assistant.cjs` fixes the model
+  (Claude Opus 5.5), thinking and limits; the renderer only decides what to
+  say. Requests go through Electron's own fetch, so they use the system proxy
+- **It reads, it does not write.** The first message of a conversation
+  carries the open team's board: columns, people, sprints with burndown and
+  velocity, open work, blockers, your follow-ups and the last stand-up
+  (`src/assistant/context.ts`). Tools let it look further — one task's
+  history, a search, a sprint in detail, stand-up notes, retros, blocker
+  history. Anything that would change something comes back as a proposal
+  with Apply and Skip, and only Apply touches the database, through the repo
+  layer like any screen. Claude is told which were applied and which skipped
+- **Matched by what it can see.** It names tasks by key and people and
+  columns by name, never by id; a name it cannot match goes back to it as an
+  error rather than being guessed. Jira-owned fields are refused, since the
+  next pull would undo them — reviewer, tester and blockers are Scrumly's
+- **Teams kept on this computer only are hidden from it**, along with
+  everything that hangs off them — the same rule sync and backups use
+  (`src/assistant/sight.ts`), because whatever it reads is sent to
+  Anthropic. Settings → Assistant can let one through, per team, on purpose.
+  Notes marked private are never sent
+- **One conversation for as long as the app is open.** Closing the panel
+  keeps it; New starts again. The history sent to Claude only ever grows —
+  earlier turns are never edited — and the stable part of every request is
+  cached, so each question pays full price only for what is new
+
+The renderer imports the SDK's types only, so none of it reaches the
+bundle; the main process is what `require()`s it (see Updates, above).
 
 ## About the name
 

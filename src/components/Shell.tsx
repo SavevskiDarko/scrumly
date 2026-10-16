@@ -1,5 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useRef, useState } from 'react'
+import { AssistantPanel } from '../assistant/AssistantPanel'
+import { useAssistant } from '../assistant/AssistantProvider'
 import { db } from '../db/schema'
 import { go, useRoute } from '../hooks/useRoute'
 import { blockers, people, settings, sheets, teams as teamRepo } from '../repo'
@@ -104,6 +106,7 @@ function TeamSwitcher({ activeTeamId }: { activeTeamId: string | null }) {
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const route = useRoute()
+  const assistant = useAssistant()
   const [open, setOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const cfg = useLiveQuery(() => settings.get(), [])
@@ -182,6 +185,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
         <div className="rail-foot">
           <ul className="nav">
+            {assistant.bridge && (
+              <li>
+                <button className={assistant.open ? 'on' : ''} title="Assistant (Ctrl+J)"
+                  onClick={() => { assistant.setOpen((v) => !v); setOpen(false) }}>
+                  <span className="dot-ico" />
+                  Assistant
+                </button>
+              </li>
+            )}
             <li>
               <button className={route.screen === 'settings' ? 'on' : ''} onClick={() => { go('settings'); setOpen(false) }}>
                 <span className="dot-ico" />
@@ -196,6 +208,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <button className="menu-toggle btn ghost" onClick={() => setOpen((v) => !v)}>Menu</button>
         {children}
       </div>
+
+      <AssistantPanel />
     </div>
   )
 }

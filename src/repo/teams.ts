@@ -54,6 +54,11 @@ export const teams = {
     await db.teams.update(id, { localOnly: on ? true : undefined })
   },
 
+  /** Lets the assistant read a team kept on this computer only, or stops it again. */
+  async setAssistant(id: ID, on: boolean) {
+    await db.teams.update(id, { assistant: on ? true : undefined })
+  },
+
   /** Refuses while the team still owns work — losing a board to a stray click is not acceptable. */
   async remove(id: ID): Promise<{ ok: boolean; reason?: string }> {
     const taskCount = await db.tasks.where('teamId').equals(id).count()

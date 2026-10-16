@@ -41,6 +41,15 @@ contextBridge.exposeInMainWorld('scrumlyDesktop', {
     disconnect: () => ipcRenderer.invoke('scrumly:google-disconnect'),
     read: (spreadsheetId, gid) => ipcRenderer.invoke('scrumly:google-read', spreadsheetId, gid),
   },
+  // The same again for Claude: the key goes in once, answers come back.
+  assistant: {
+    status: () => ipcRenderer.invoke('scrumly:assistant-status'),
+    connect: (input) => ipcRenderer.invoke('scrumly:assistant-connect', input),
+    disconnect: () => ipcRenderer.invoke('scrumly:assistant-disconnect'),
+    send: (requestId, request) => ipcRenderer.invoke('scrumly:assistant-send', requestId, request),
+    cancel: (requestId) => ipcRenderer.invoke('scrumly:assistant-cancel', requestId),
+    onText: (fn) => listen('scrumly:assistant-text', (requestId, text) => fn(String(requestId), String(text))),
+  },
 })
 
 /** Subscribes, and hands back the way to stop: the event object itself never crosses over. */

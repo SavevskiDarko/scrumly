@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Suspense, lazy, useEffect, useRef, useState } from 'react'
+import { AssistantProvider } from './assistant/AssistantProvider'
 import { AutoSaveProvider } from './components/AutoSaveProvider'
 import { DesktopProvider, useDesktop } from './desktop/DesktopProvider'
 import { Shell } from './components/Shell'
@@ -139,7 +140,9 @@ export default function App() {
           starts asking the database questions. */}
       <DesktopProvider>
         <AutoSaveProvider>
-          <Inner />
+          <AssistantProvider>
+            <Inner />
+          </AssistantProvider>
         </AutoSaveProvider>
       </DesktopProvider>
     </ToastHost>
