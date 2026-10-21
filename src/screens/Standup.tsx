@@ -4,16 +4,34 @@ import { Avatar } from '../components/Avatar'
 import { StandupOrder } from '../components/StandupOrder'
 import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
-import type { Person, StatusEvent, Task } from '../db/types'
+import type { Blocker, Person, StatusEvent, Task } from '../db/types'
 import { go } from '../hooks/useRoute'
 import { useTeamPeople } from '../hooks/useTeamPeople'
 import { formatDate } from '../lib/dates'
 import {
-  blockedDays, blockers as blockerRepo, buildIndex, daysInStatus, followUps as fuRepo,
-  standups, tasks as taskRepo, teams as teamRepo, type StandupSummary,
+  blockedDays, blockers as blockerRepo, buildIndex, daysInStatus, describeWaitingOn, followUps as fuRepo,
+  sprints as sprintRepo, standups, tasks as taskRepo, teams as teamRepo, type StandupSummary,
 } from '../repo'
 
 type Capture = 'blocker' | 'followup' | 'task'
+
+/**
+ * The same choices as "Mark as blocked" in the task drawer. Every blocker
+ * raised here used to be filed as something outside the team, which piled them
+ * all onto one line of "Where the days went" whoever they were really waiting on.
+ */
+const WAIT_KINDS: { value: Blocker['waitingOnType']; label: string }[] = [
+  { value: 'person', label: 'Someone on the team' },
+  { value: 'task', label: 'Another task' },
+  { value: 'team', label: 'Another team' },
+  { value: 'external', label: 'Something outside' },
+]
+
+interface WaitingOn { kind: Blocker['waitingOnType']; personId: string; taskId: string; text: string }
+
+// Someone on the team, as in the drawer: a stand-up blocker is most often a
+// teammate's review or answer, and this way naming them is one pick.
+const NO_WAIT: WaitingOn = { kind: 'person', personId: '', taskId: '', text: '' }
 
 function Elapsed({ from }: { from: number }) {
   const [, tick] = useState(0)
@@ -34,6 +52,7 @@ export function Standup({ teamId }: { teamId: string }) {
   const [mode, setMode] = useState<Capture>('blocker')
   const [text, setText] = useState('')
   const [targetTaskId, setTargetTaskId] = useState('')
+  const [waitingOn, setWaitingOn] = useState<WaitingOn>(NO_WAIT)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const session = useLiveQuery(
@@ -80,6 +99,8 @@ export function Standup({ teamId }: { teamId: string }) {
     : []
 
   useEffect(() => { setTargetTaskId(theirActive[0]?.id ?? theirs[0]?.id ?? '') }, [current?.id, theirs.length])
+  // A half-picked "waiting on" belongs to whoever was talking, not to the next person's blocker.
+  useEffect(() => { setWaitingOn(NO_WAIT) }, [current?.id])
 
   /**
    * What this person said, typed while they are still talking.
@@ -234,19 +255,37 @@ export function Standup({ teamId }: { teamId: string }) {
     return i >= 0 && i < statuses.length - 1 ? statuses[i + 1] : null
   }
 
+  // Open work only: nothing is waiting on a task that is already finished.
+  const waitTasks = tasks.filter((t) => t.id !== targetTaskId && !ix.doneIds.has(t.statusId))
+
   async function capture() {
     if (!text.trim() || !current) return
     if (mode === 'blocker') {
       if (!targetTaskId) { toast('Pick which task is blocked', true); return }
-      await blockerRepo.open(targetTaskId, { reason: text, waitingOnType: 'external', waitingOnText: null })
-      toast('Blocker recorded')
+      // Looked up rather than taken from state, so a pick that has since left
+      // its list is saved as nobody, which is what the select is showing.
+      const onPerson = waitingOn.kind === 'person' ? people.find((p) => p.id === waitingOn.personId) : undefined
+      const onTask = waitingOn.kind === 'task' ? waitTasks.find((t) => t.id === waitingOn.taskId) : undefined
+      const b = await blockerRepo.open(targetTaskId, {
+        reason: text,
+        waitingOnType: waitingOn.kind,
+        waitingOnPersonId: onPerson?.id ?? null,
+        waitingOnTaskId: onTask?.id ?? null,
+        waitingOnText: waitingOn.kind === 'team' || waitingOn.kind === 'external' ? waitingOn.text.trim() || null : null,
+      })
+      toast(`Blocker recorded, waiting on ${describeWaitingOn(b, onPerson?.name, onTask?.key)}`)
+      setWaitingOn(NO_WAIT)
     } else if (mode === 'followup') {
       await fuRepo.create({ title: text, personId: current.id })
       toast('Follow-up saved for you')
     } else {
       const col = statuses[1] ?? statuses[0]
-      await taskRepo.create({ teamId, statusId: col.id, title: text, assigneeId: current.id })
-      toast(`Task added for ${current.name.split(' ')[0]}`)
+      const task = await taskRepo.create({ teamId, statusId: col.id, title: text, assigneeId: current.id })
+      // Into the running sprint, or it is missing from the board, which opens on
+      // that sprint. Through setSprint rather than create, so the join is logged like any other.
+      const running = await sprintRepo.active(teamId)
+      if (running) await taskRepo.setSprint(task.id, running.id)
+      toast(`Task added for ${current.name.split(' ')[0]}${running ? ` in ${running.name}` : ''}`)
     }
     setText('')
   }
@@ -372,9 +411,39 @@ export function Standup({ teamId }: { teamId: string }) {
                   ))}
                 </div>
                 {mode === 'blocker' && theirs.length > 0 && (
-                  <select className="select" style={{ marginBottom: 7 }} value={targetTaskId} onChange={(e) => setTargetTaskId(e.target.value)}>
-                    {theirs.map((t) => <option key={t.id} value={t.id}>{t.key} — {t.title}</option>)}
-                  </select>
+                  <>
+                    <select className="select" style={{ marginBottom: 7 }} value={targetTaskId} onChange={(e) => setTargetTaskId(e.target.value)}>
+                      {theirs.map((t) => <option key={t.id} value={t.id}>{t.key} — {t.title}</option>)}
+                    </select>
+                    <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap', marginBottom: 7 }}>
+                      <span className="label" style={{ flex: 'none' }}>Waiting on</span>
+                      <select className="select" style={{ width: 176, flex: 'none' }} aria-label="Waiting on" value={waitingOn.kind}
+                        onChange={(e) => setWaitingOn({ ...NO_WAIT, kind: e.target.value as Blocker['waitingOnType'] })}>
+                        {WAIT_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+                      </select>
+                      {waitingOn.kind === 'person' && (
+                        <select className="select" style={{ flex: '1 1 140px', minWidth: 0 }} aria-label="Who" value={waitingOn.personId}
+                          onChange={(e) => setWaitingOn({ ...waitingOn, personId: e.target.value })}>
+                          <option value="">Who?</option>
+                          {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                      )}
+                      {waitingOn.kind === 'task' && (
+                        <select className="select" style={{ flex: '1 1 140px', minWidth: 0 }} aria-label="Which task" value={waitingOn.taskId}
+                          onChange={(e) => setWaitingOn({ ...waitingOn, taskId: e.target.value })}>
+                          <option value="">Which task?</option>
+                          {waitTasks.map((t) => <option key={t.id} value={t.id}>{t.key} — {t.title}</option>)}
+                        </select>
+                      )}
+                      {(waitingOn.kind === 'team' || waitingOn.kind === 'external') && (
+                        <input className="input" style={{ flex: '1 1 140px', minWidth: 0 }}
+                          placeholder={waitingOn.kind === 'team' ? 'Which team' : 'Vendor, ticket number, whatever'}
+                          value={waitingOn.text} onChange={(e) => setWaitingOn({ ...waitingOn, text: e.target.value })}
+                          // Enter saves from here too, or moves on to the reason if there is none yet.
+                          onKeyDown={(e) => { if (e.key === 'Enter') { if (text.trim()) void capture(); else inputRef.current?.focus() } }} />
+                      )}
+                    </div>
+                  </>
                 )}
                 <input
                   ref={inputRef}

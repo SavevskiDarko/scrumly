@@ -1,9 +1,11 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { Avatar } from '../components/Avatar'
-import { useToast } from '../components/Toast'
+import { BlockerButtons, BlockerNote } from '../components/BlockerActions'
 import { db } from '../db/schema'
+import type { Chase, ID } from '../db/types'
 import { setParam } from '../hooks/useRoute'
+import { formatDate } from '../lib/dates'
 import { blockedDays, blockers as repo, describeWaitingOn, groupWaitingOn } from '../repo'
 
 function ago(ts: number) {
@@ -12,8 +14,9 @@ function ago(ts: number) {
 }
 
 export function Blockers({ teamId }: { teamId: string }) {
-  const toast = useToast()
   const [tab, setTab] = useState<'open' | 'resolved'>('open')
+  // The one blocker whose row has its note box open, if any.
+  const [noting, setNoting] = useState<ID | null>(null)
 
   const rows = useLiveQuery(() => (tab === 'open' ? repo.listOpen() : repo.listResolved()), [tab], [])
   const tasks = useLiveQuery(() => db.tasks.where('teamId').equals(teamId).toArray(), [teamId], [])
@@ -31,10 +34,10 @@ export function Blockers({ teamId }: { teamId: string }) {
   const taskById = new Map(tasks.map((t) => [t.id, t]))
   const personById = new Map(people.map((p) => [p.id, p]))
   const statusById = new Map(statuses.map((s) => [s.id, s]))
-  const chasesByBlocker = new Map<string, number[]>()
-  for (const c of chases) {
+  const chasesByBlocker = new Map<string, Chase[]>()
+  for (const c of [...chases].sort((a, b) => a.at - b.at)) {
     const list = chasesByBlocker.get(c.blockerId) ?? []
-    list.push(c.at)
+    list.push(c)
     chasesByBlocker.set(c.blockerId, list)
   }
 
@@ -113,7 +116,7 @@ export function Blockers({ teamId }: { teamId: string }) {
                 <span style={{ flex: 1 }}>Task</span>
                 <span style={{ width: 168 }}>Waiting on</span>
                 <span style={{ width: 116 }}>Chased</span>
-                <span style={{ width: 150 }} />
+                <span style={{ width: 176 }} />
               </div>
               {mine.map((b) => {
                 const task = taskById.get(b.taskId)!
@@ -121,34 +124,48 @@ export function Blockers({ teamId }: { teamId: string }) {
                 const owner = task.assigneeId ? personById.get(task.assigneeId) : null
                 const list = chasesByBlocker.get(b.id) ?? []
                 return (
-                  <div key={b.id} className="row">
-                    <b style={{ width: 52, fontSize: 15, color: days >= 3 ? 'var(--alert)' : 'var(--ink)' }}>{days}d</b>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <button className="linkish" onClick={() => setParam('task', task.id)}>{task.title}</button>
-                      <div className="small faint" style={{ display: 'flex', gap: 7, alignItems: 'center', marginTop: 3 }}>
-                        <Avatar person={owner} size={16} />
-                        <span>{owner?.name ?? 'Nobody'}</span>
-                        <span>·</span>
-                        <span>{statusById.get(task.statusId)?.name}</span>
-                        <span>·</span>
-                        <span>{b.reason}</span>
+                  <Fragment key={b.id}>
+                    <div className="row">
+                      <b style={{ width: 52, fontSize: 15, color: days >= 3 ? 'var(--alert)' : 'var(--ink)' }}>{days}d</b>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <button className="linkish" onClick={() => setParam('task', task.id)}>{task.title}</button>
+                        <div className="small faint" style={{ display: 'flex', gap: 7, alignItems: 'center', marginTop: 3 }}>
+                          <Avatar person={owner} size={16} />
+                          <span>{owner?.name ?? 'Nobody'}</span>
+                          <span>·</span>
+                          <span>{statusById.get(task.statusId)?.name}</span>
+                          <span>·</span>
+                          <span>{b.reason}</span>
+                        </div>
+                        {/* How it cleared is the other half of the retro story. */}
+                        {b.resolvedAt !== null && (
+                          <div className="small" style={{ marginTop: 3 }}>
+                            <span className="faint">Resolved {formatDate(b.resolvedAt)}{b.resolutionNote ? ':' : ''}</span>
+                            {b.resolutionNote && <span className="muted"> {b.resolutionNote}</span>}
+                          </div>
+                        )}
+                      </div>
+                      <span style={{ width: 168 }}>{describe(b)}</span>
+                      <span style={{ width: 116 }} className={list.length ? '' : 'faint'}
+                        title={list.map((c) => `${formatDate(c.at)}${c.note ? ` — ${c.note}` : ''}`).join('\n') || undefined}>
+                        {list.length === 0 ? 'Never' : `${list.length}× · ${ago(list[list.length - 1].at)}`}
+                      </span>
+                      <div style={{ width: 176, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        {tab === 'resolved' ? (
+                          <button className="btn ghost sm" onClick={() => repo.reopen(b.id)}>Reopen</button>
+                        ) : noting !== b.id && (
+                          <BlockerButtons blockerId={b.id} onNote={() => setNoting(b.id)} />
+                        )}
                       </div>
                     </div>
-                    <span style={{ width: 168 }}>{describe(b)}</span>
-                    <span style={{ width: 116 }} className={list.length ? '' : 'faint'}>
-                      {list.length === 0 ? 'Never' : `${list.length}× · ${ago(list[list.length - 1])}`}
-                    </span>
-                    <div style={{ width: 150, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                      {tab === 'open' ? (
-                        <>
-                          <button className="btn sm" onClick={async () => { await repo.chase(b.id); toast('Chase logged') }}>Chase</button>
-                          <button className="btn sm" onClick={async () => { await repo.resolve(b.id); toast('Unblocked') }}>Unblock</button>
-                        </>
-                      ) : (
-                        <button className="btn ghost sm" onClick={() => repo.reopen(b.id)}>Reopen</button>
-                      )}
-                    </div>
-                  </div>
+                    {/* Under its own row and lined up with the task, so there is no doubt which blocker it is for. */}
+                    {tab === 'open' && noting === b.id && (
+                      <div className="row" style={{ borderTop: 0, paddingTop: 0 }}>
+                        <span style={{ width: 52, flex: 'none' }} />
+                        <BlockerNote blockerId={b.id} onDone={() => setNoting(null)} />
+                      </div>
+                    )}
+                  </Fragment>
                 )
               })}
             </div>

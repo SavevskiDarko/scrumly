@@ -1,11 +1,13 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { Avatar } from '../components/Avatar'
+import { DateField } from '../components/DateField'
 import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
 import type { Board, ID, PiObjective, PiRisk, PiVote, ProgramIncrement, RoamStatus, Sprint, Status, Task, TaskLink } from '../db/types'
 import { go, setParam } from '../hooks/useRoute'
 import { piIterations, programBoardSkeleton } from '../canvas/programBoard'
+import { formatDate } from '../lib/dates'
 import {
   boards as boardRepo, DEPENDENCY_HINT, DEPENDENCY_LABEL, dependencyState, links as linkRepo, pi as repo, piObjectives,
   piRisks, piVotes, settings as settingsRepo, sprints as sprintRepo, type DependencyState,
@@ -48,9 +50,11 @@ function NewPi({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         <input className="input" placeholder="PI name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input className="input" type="date" style={{ width: 160 }} value={start} onChange={(e) => setStart(e.target.value)} />
+          <DateField label="PI start" clearable style={{ width: 160, flex: 'none' }} value={start || null}
+            onCommit={(iso) => setStart(iso ?? '')} />
           <span className="small faint">to</span>
-          <input className="input" type="date" style={{ width: 160 }} value={end} onChange={(e) => setEnd(e.target.value)} />
+          <DateField label="PI end" clearable style={{ width: 160, flex: 'none' }} value={end || null}
+            onCommit={(iso) => setEnd(iso ?? '')} />
           <span className="small faint">Usually 4–5 sprints plus an IP iteration.</span>
         </div>
         <div>
@@ -85,6 +89,7 @@ export function PiPlanning() {
   const [riskText, setRiskText] = useState('')
   const [riskOwner, setRiskOwner] = useState('')
   const [drawing, setDrawing] = useState(false)
+  const [dateRev, setDateRev] = useState(0)
 
   const cfg = useLiveQuery(() => settingsRepo.get(), [])
   const teams = useLiveQuery(() => db.teams.orderBy('name').toArray(), [], [])
@@ -150,6 +155,17 @@ export function PiPlanning() {
   async function save(id: string, patch: Parameters<typeof repo.update>[1]) {
     const r = await repo.update(id, patch)
     if (!r.ok) toast(r.reason ?? 'Could not save that', true)
+    return r.ok
+  }
+
+  /**
+   * A date field keeps showing what was typed into it until the saved value
+   * changes, and a refused date never changes it. Left there, the refused date
+   * reads as saved and the next edit is made against dates the PI does not
+   * have, so a refusal redraws both fields from what is stored.
+   */
+  async function saveDate(id: string, patch: { startDate: string } | { endDate: string }) {
+    if (!(await save(id, patch))) setDateRev((n) => n + 1)
   }
 
   const iterations = current ? piIterations(current, cfg?.sprintLengthDays ?? 14) : []
@@ -228,11 +244,11 @@ export function PiPlanning() {
                     onBlur={(e) => void save(current.id, { name: e.target.value })} />
 
                   <div style={{ display: 'flex', gap: 7, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-                    <input className="input" type="date" style={{ width: 142 }} value={current.startDate}
-                      onChange={(e) => void save(current.id, { startDate: e.target.value })} />
+                    <DateField key={`start-${dateRev}`} label="PI start" style={{ width: 166 }} value={current.startDate}
+                      onCommit={(iso) => { if (iso) void saveDate(current.id, { startDate: iso }) }} />
                     <span className="small faint">to</span>
-                    <input className="input" type="date" style={{ width: 142 }} value={current.endDate}
-                      onChange={(e) => void save(current.id, { endDate: e.target.value })} />
+                    <DateField key={`end-${dateRev}`} label="PI end" style={{ width: 166 }} value={current.endDate}
+                      onCommit={(iso) => { if (iso) void saveDate(current.id, { endDate: iso }) }} />
                     <span className={`chip${current.state === 'active' ? ' on' : current.state === 'closed' ? ' solid' : ''}`}>
                       {current.state}
                     </span>
@@ -314,7 +330,7 @@ export function PiPlanning() {
                           {inWindow.length === 0 && <span className="small faint">No sprints planned in this range.</span>}
                           {inWindow.map((s) => (
                             <span key={s.id} className={`chip${s.state === 'active' ? ' on' : s.state === 'closed' ? ' solid' : ''}`}>
-                              {s.name} · {s.startDate}–{s.endDate}
+                              {s.name} · {formatDate(s.startDate)} – {formatDate(s.endDate)}
                             </span>
                           ))}
                           <button className="btn sm ghost" onClick={() => void planSprintFor(t.id)}>Plan sprint</button>
@@ -500,7 +516,7 @@ export function PiPlanning() {
               >
                 <b style={{ width: 160, flex: 'none' }}>{p.name}</b>
                 <span className={`chip${p.state === 'active' ? ' on' : p.state === 'closed' ? ' solid' : ''}`}>{p.state}</span>
-                <span className="small faint" style={{ flex: 1 }}>{p.startDate} – {p.endDate}</span>
+                <span className="small faint" style={{ flex: 1 }}>{formatDate(p.startDate)} – {formatDate(p.endDate)}</span>
                 <span className="small faint">{p.teamIds.length} team{p.teamIds.length === 1 ? '' : 's'}</span>
               </button>
             ))}

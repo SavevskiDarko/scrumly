@@ -7,7 +7,8 @@ export {
   isOverdue, isStuckTask, isUnowned, loadByPerson, ownerFieldFor, ownerOf, queues, todayISO,
 } from './insights'
 export type { BoardIndex, Bucket, FlowStats, Load, OwnerField, Queue } from './insights'
-export { followUps } from './followUps'
+export { followUps, followUpDue, byDue } from './followUps'
+export type { FollowUpDue } from './followUps'
 export { standups, rotate, runningOrder } from './standups'
 export type { StandupSummary } from './standups'
 export { people, ROLES } from './people'
@@ -28,6 +29,8 @@ export {
   links, reaches, dependencyState, worstState, DEPENDENCY_LABEL, DEPENDENCY_HINT,
 } from './links'
 export type { DependencyState } from './links'
+export { externalLinks, webUrl, linkHost, NOT_A_LINK } from './externalLinks'
+export type { ExternalLinkResult } from './externalLinks'
 export type { EntityType } from './boards'
 export type { Snapshot } from './backup'
 export { newId, initialsOf, hashSeed } from './ids'

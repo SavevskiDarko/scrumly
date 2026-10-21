@@ -9,6 +9,7 @@ import {
   actionOutcomes, availability, capacityPlan, dependencyState, links, worstState,
   kpis, boardSeries, readKpi, kpiStatus, kpiSummary, formatKpiValue, pi,
   sheets, parseSheetUrl, embedUrl, browserUrl, signInTarget,
+  byDue, followUpDue, externalLinks, webUrl, linkHost, NOT_A_LINK,
 } from '../src/repo'
 import { flowSkeleton, looksLikeFlow, parseFlow } from '../src/canvas/quickFlow'
 import { piIterations, programBoardSkeleton } from '../src/canvas/programBoard'
@@ -585,6 +586,38 @@ async function run() {
   await followUps.remove(fu2.id)
   check('deleting one really removes it', (await db.followUps.get(fu2.id)) === undefined)
 
+  // Follow-ups always had a due date, and the assistant set it; nothing else
+  // could, and nothing showed it. Today does both now, in this order.
+  const DUE_DAY = '2026-09-25'
+  const fuLate = await followUps.create({ title: 'Chase legal about the DPA', dueDate: '2026-09-21' })
+  const fuToday = await followUps.create({ title: 'Ask ops about staging' })
+  const fuLater = await followUps.create({ title: 'Book the demo room', dueDate: '2026-10-02' })
+  const fuUndated = await followUps.create({ title: 'Talk to Elena about load' })
+  const dueRows = [fuLate, fuToday, fuLater, fuUndated]
+  for (const [i, f] of dueRows.entries()) await db.followUps.update(f.id, { createdAt: 1_000 + i })
+  await followUps.setDue(fuToday.id, DUE_DAY)
+  check('a due date can be set after the fact', (await db.followUps.get(fuToday.id))!.dueDate === DUE_DAY)
+  const [late, onDay, later, undated] = await Promise.all(dueRows.map(async (f) => (await db.followUps.get(f.id))!))
+  check('one past its date is overdue', followUpDue(late, DUE_DAY) === 'overdue')
+  check('one due on the day is due today', followUpDue(onDay, DUE_DAY) === 'today')
+  check('one due after it is neither', followUpDue(later, DUE_DAY) === 'later')
+  check('one without a date has nothing to be late for', followUpDue(undated, DUE_DAY) === 'none')
+  check('open ones run overdue, then today, then later, then undated',
+    [undated, later, onDay, late].sort(byDue).map((f) => f.id).join() === dueRows.map((f) => f.id).join(),
+    [undated, later, onDay, late].sort(byDue).map((f) => f.title).join(' | '))
+  await followUps.complete(fuLate.id)
+  check('a done one is late for nothing', followUpDue((await db.followUps.get(fuLate.id))!, DUE_DAY) === 'none')
+  await followUps.reopen(fuLate.id)
+  await followUps.setDue(fuLater.id, null)
+  check('a due date can be cleared', (await db.followUps.get(fuLater.id))!.dueDate === null)
+  const bothUndated = [(await db.followUps.get(fuUndated.id))!, (await db.followUps.get(fuLater.id))!]
+  check('undated ones wait longest-first',
+    bothUndated.sort(byDue).map((f) => f.id).join() === [fuLater.id, fuUndated.id].join())
+  let badDue = false
+  try { await followUps.setDue(fuUndated.id, '25/09/2026') } catch { badDue = true }
+  check('a date in any shape but the stored one is refused', badDue && (await db.followUps.get(fuUndated.id))!.dueDate === null)
+  for (const f of dueRows) await followUps.remove(f.id)
+
   // ---------- velocity, cycle time, and where the days went ----------
   console.log('\n  -- analytics --')
 
@@ -1016,6 +1049,45 @@ async function run() {
 
   await tasks.remove(api.id)
   check('deleting a task takes its dependencies with it', (await links.forTask(ui.id)).waitsOn.length === 0)
+
+  // ---------- links out of a task ----------
+  console.log('\n  -- links --')
+
+  check('a link is kept as written', webUrl('https://github.com/acme/pay/pull/12') === 'https://github.com/acme/pay/pull/12')
+  check('one typed without https:// is taken as https',
+    webUrl('  github.com/acme/pay/pull/12 ') === 'https://github.com/acme/pay/pull/12', String(webUrl('  github.com/acme/pay/pull/12 ')))
+  check('plain http is a web link too', webUrl('http://intranet/wiki/Payments') === 'http://intranet/wiki/Payments')
+  check('a port is not mistaken for a scheme',
+    webUrl('jira.acme.com:8443/browse/PAY-1') === 'https://jira.acme.com:8443/browse/PAY-1', String(webUrl('jira.acme.com:8443/browse/PAY-1')))
+  check('nothing but http and https gets in', [
+    'javascript:alert(1)', 'JavaScript:alert(1)', ' javascript:1', 'mailto:ops@acme.com', 'file:///C:/Windows/System32/calc.exe',
+    'data:text/html,<b>hi</b>', 'ftp://files.acme.com/x', 'vbscript:msgbox(1)', 'see https://x.com', 'standup', '',
+  ].every((u) => webUrl(u) === null))
+  check('a link reads as its site, without the www', linkHost('https://www.figma.com/file/abc') === 'figma.com')
+
+  const lTeam = await teams.create({ name: 'Link Team' })
+  const lTask = await tasks.create({ teamId: lTeam.id, statusId: pTodo.id, title: 'Payment retries' })
+  const pr = await externalLinks.add(lTask.id, { url: 'github.com/acme/pay/pull/12', label: '  The PR  ' })
+  check('a link is added with its label trimmed', pr.ok && pr.link.label === 'The PR' && pr.link.url === 'https://github.com/acme/pay/pull/12')
+  const design = await externalLinks.add(lTask.id, { url: 'https://www.figma.com/file/abc', label: '   ' })
+  check('without a label it is named after the site', design.ok && design.link.label === 'figma.com')
+  const twice = await externalLinks.add(lTask.id, { url: 'https://github.com/acme/pay/pull/12' })
+  check('the same address twice is refused, saying where it already is', !twice.ok && twice.reason.includes('The PR'))
+  const sneaky = await externalLinks.add(lTask.id, { url: 'javascript:alert(1)', label: 'Click me' })
+  check('anything else is refused, saying why', !sneaky.ok && sneaky.reason === NOT_A_LINK)
+  check('a task that is gone takes none', !(await externalLinks.add('no-such-task', { url: 'https://example.com' })).ok)
+  check('a task lists its links in the order they were added',
+    (await externalLinks.forTask(lTask.id)).map((l) => l.label).join() === 'The PR,figma.com')
+  const readLinks = await runTool('read_task', { key: lTask.key }, { activeTeamId: lTeam.id })
+  check('the assistant reads them along with the task',
+    readLinks.kind === 'result' && readLinks.text.includes('The PR — https://github.com/acme/pay/pull/12'), JSON.stringify(readLinks))
+  check('backups carry them', (await backup.snapshot()).tables.externalLinks
+    .filter((l) => (l as { taskId: string }).taskId === lTask.id).length === 2)
+  await externalLinks.remove(design.ok ? design.link.id : '')
+  check('removing one takes only that one', (await externalLinks.forTask(lTask.id)).map((l) => l.label).join() === 'The PR')
+  await tasks.remove(lTask.id)
+  check('deleting a task takes its links with it', (await db.externalLinks.where('taskId').equals(lTask.id).count()) === 0)
+  await teams.remove(lTeam.id)
 
   // ---------- retros that remember ----------
   console.log('\n  -- retros --')

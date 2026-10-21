@@ -10,6 +10,7 @@ import { Avatar } from './Avatar'
 import { BlockedPanel } from './BlockedPanel'
 import { DateField } from './DateField'
 import { DependencyPanel } from './DependencyPanel'
+import { LinksPanel } from './LinksPanel'
 import { useToast } from './Toast'
 
 const PRIORITIES: Priority[] = ['low', 'normal', 'high', 'urgent']
@@ -115,11 +116,12 @@ export function TaskDrawer({ taskId }: { taskId: ID }) {
           {task.jira && (
             <p className="small faint" style={{ margin: '-8px 0 0' }}>
               From Jira. Its title, status, sprint, assignee, size and dates come from there and are replaced on the
-              next pull; reviewer, tester, blockers and dependencies are kept.
+              next pull; reviewer, tester, blockers, dependencies and links are kept.
             </p>
           )}
 
-          <BlockedPanel taskId={task.id} teamId={task.teamId} />
+          {/* Keyed by task, so a half-typed blocker or note never follows you to the next one. */}
+          <BlockedPanel key={`blocked-${task.id}`} taskId={task.id} teamId={task.teamId} />
 
           <div className="field">
             <span className="label">Description</span>
@@ -133,6 +135,8 @@ export function TaskDrawer({ taskId }: { taskId: ID }) {
           </div>
 
           <DependencyPanel task={task} />
+
+          <LinksPanel key={`links-${task.id}`} taskId={task.id} />
 
           <div>
             <p className="panel-title">

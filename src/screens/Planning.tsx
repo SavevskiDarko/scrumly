@@ -150,7 +150,7 @@ export function Planning({ teamId }: { teamId: string }) {
       lengthDays: cfg?.sprintLengthDays ?? 14,
       startWeekday: cfg?.sprintStartWeekday ?? 1,
     })
-    toast(`${s.name} planned for ${s.startDate}`)
+    toast(`${s.name} planned for ${fmt(s.startDate)}`)
     setParam('sprint', s.id)
   }
 
