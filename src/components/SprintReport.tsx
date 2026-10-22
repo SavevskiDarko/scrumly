@@ -329,7 +329,7 @@ function ScopeLine({ label, tasks, byPoints }: { label: string; tasks: Task[]; b
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
       <span style={{ flex: 1 }}>{label}</span>
       <b>{tasks.length}</b>
-      {byPoints && <span className="small faint" style={{ width: 34, textAlign: 'right' }}>{num(pointsIn(tasks))}p</span>}
+      {byPoints && <span className="small faint" style={{ width: 46, textAlign: 'right' }}>{plural(pointsIn(tasks), 'pt')}</span>}
     </div>
   )
 }
@@ -390,6 +390,7 @@ export function SprintReport({
   const addedIds = new Set(r.added.map((t) => t.id))
   const left = r.leftover.map((l) => l.task)
   const sayDoPct = r.sayDo ? Math.round((r.sayDo.delivered / r.sayDo.committed) * 100) : null
+  const unsizedCommitted = r.committed.filter((t) => pointsOf(t) === 0).length
   const retroLines = (retro?.body ?? '').split('\n').map((l) => l.trim()).filter(Boolean)
     .map((l) => (l.length > 180 ? `${l.slice(0, 179)}…` : l))
 
@@ -488,7 +489,9 @@ export function SprintReport({
                 </p>
               </div>
               <div className="panel" style={{ flex: 1, minWidth: 210 }}>
-                <p className="panel-title">Scope</p>
+                <p className="panel-title">
+                  Scope<span className="spacer" /><span className="faint" style={{ fontWeight: 400 }}>{byPoints ? 'tasks · points' : 'tasks'}</span>
+                </p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <ScopeLine label="Committed" tasks={r.committed} byPoints={byPoints} />
                   <ScopeLine label="Added after it started" tasks={r.added} byPoints={byPoints} />
@@ -502,6 +505,12 @@ export function SprintReport({
                         + `${plural(r.sayDo.committed, r.sayDo.unit === 'points' ? 'point' : 'task')} committed on day one `
                         + `${closed ? 'were delivered' : 'are done so far'}.`}
                   </span>
+                  {r.sayDo?.unit === 'points' && unsizedCommitted > 0 && (
+                    <span>
+                      {unsizedCommitted} of the {r.committed.length} committed tasks
+                      {unsizedCommitted === 1 ? ' has' : ' have'} no size, so they count for nothing in the points.
+                    </span>
+                  )}
                   {r.committed.length > 0 && r.added.length > 0 && (
                     <span>Scope grew {Math.round((r.added.length / r.committed.length) * 100)}% after day one.</span>
                   )}
