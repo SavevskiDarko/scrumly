@@ -173,6 +173,19 @@ export default function CanvasEditor({ boardId }: { boardId: string }) {
     }
   }
 
+  async function remove() {
+    if (!board) return
+    const n = links.filter((l) => l.entityType === 'task').length
+    const attached = n ? ` It is attached to ${n} task${n === 1 ? '' : 's'}, which will lose it.` : ''
+    if (!confirm(`Delete "${board.title}"?${attached}`)) return
+    // The edit still waiting would otherwise be written as the editor closes.
+    if (saveTimer.current) { window.clearTimeout(saveTimer.current); saveTimer.current = null }
+    pending.current = null
+    await boardRepo.remove(board.id)
+    toast(`${board.title} deleted`)
+    go('boards')
+  }
+
   if (board === undefined) return <div className="empty" style={{ marginTop: 70 }}>Opening the board…</div>
   if (!board) return <div className="empty" style={{ marginTop: 70 }}><strong>That board is gone</strong>It may have been deleted.</div>
   // Switching boards keeps this component mounted, so the query can still be
@@ -226,6 +239,7 @@ export default function CanvasEditor({ boardId }: { boardId: string }) {
             setPresenting(true)
             setTimeout(() => apiRef.current?.scrollToContent(undefined, { fitToContent: true }), 60)
           }}>Present</button>
+          <button className="btn danger" onClick={remove}>Delete</button>
         </div>
       )}
 
