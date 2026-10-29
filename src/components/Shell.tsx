@@ -17,6 +17,7 @@ const NAV = [
   { id: 'notes', label: 'Notes' },
   { id: 'sprints', label: 'Sprints' },
   { id: 'planning', label: 'Sprint planning' },
+  { id: 'capacity', label: 'Team capacity' },
   { id: 'pi', label: 'PI Planning' },
   { id: 'people', label: 'People' },
 ]

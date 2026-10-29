@@ -310,3 +310,47 @@ export interface Sheet {
 }
 
 export type SheetView = 'editor' | 'table'
+
+/**
+ * One sprint's capacity in hours, kept the way a team keeps it in a
+ * spreadsheet: what each person has once leave and overhead are out, and the
+ * hours already booked against named work. What is left is what they can
+ * still take on. One per sprint, made the first time anything is typed in.
+ *
+ * Vacation is not in here. It is the availability Sprint planning reads, shown
+ * in hours instead of days, so the two screens never disagree about who is out.
+ */
+export interface TeamCapacity {
+  id: ID
+  teamId: ID
+  sprintId: ID
+  /** Hours in a working day. */
+  hoursPerDay: number
+  /** Hours of each day in that go to "Others": mail, admin, the odd interruption. */
+  othersPerDay: number
+  /** Hours of each day in that go to overhead: stand-ups, refinement, reviews and other meetings. */
+  overheadPerDay: number
+  /** What was typed in per person. A field left out is worked out instead. */
+  people: Record<ID, CapacityHours>
+  /** The work hours are booked against, in column order. */
+  items: CapacityItem[]
+  updatedAt: number
+}
+
+export interface CapacityHours {
+  /** Hours nobody can account for yet: a maybe-day off, a training not confirmed. */
+  unknown?: number
+  /** Typed over the hours worked out from the days they are in. */
+  others?: number
+  overhead?: number
+}
+
+export interface CapacityItem {
+  id: ID
+  /** The task it is, when it is one. Null for work kept only here, like another project's ticket. */
+  taskId: ID | null
+  /** The task's key when it was added, or whatever was typed. Still shown if the task goes. */
+  label: string
+  /** Person id -> hours booked on it. */
+  hours: Record<ID, number>
+}

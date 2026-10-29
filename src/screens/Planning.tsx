@@ -324,6 +324,8 @@ export function Planning({ teamId }: { teamId: string }) {
                 )}
                 <p className="small faint" style={{ margin: '10px 0 0' }}>
                   Blank means every working day. Enter fewer for leave, training or support rota.
+                  In hours, with the work booked against them:{' '}
+                  <button className="linkish" style={{ fontWeight: 500 }} onClick={() => go('capacity', { sprint: sprint.id })}>Team capacity</button>.
                 </p>
               </div>
             </div>

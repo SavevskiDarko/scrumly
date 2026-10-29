@@ -137,8 +137,9 @@ which sprint, and when) and `conversions` (what a note turned into).
 v3 adds `standupNotes` — what each person said, one row per person per
 stand-up. v4 adds PI Planning's four tables, v5 adds `kpis` and
 `kpiEntries` — what each person is measured on, and the readings typed in
-for the hand-tracked ones — and v6 adds `sheets`, the Google Sheets links
-below. All of them add stores only, so Dexie carries
+for the hand-tracked ones — v6 adds `sheets`, the Google Sheets links
+below, and v7 adds `teamCapacity`, each sprint's hours per person. All of
+them add stores only, so Dexie carries
 every existing row across untouched. A backup written under an earlier
 version still restores, and
 each version has its own test for exactly that, because it is the one
@@ -175,6 +176,33 @@ Now:
 Columns and whiteboards stay shared across teams on purpose: the
 workflow and the diagrams are usually yours rather than any one team's.
 Say the word if a team should own its own columns.
+
+## Team capacity
+
+The capacity spreadsheet, kept in Scrumly: one sheet per sprint, a row per
+person, and a column per piece of work hours are booked against. It does
+the spreadsheet's arithmetic:
+
+- **Working h** is the sprint's working days (holidays out) times the hours
+  in a day, 8 unless the sheet says otherwise
+- **Total capacity** is that less Unknown, Vacation, Others and OH. Others
+  (half an hour a day) and OH (two hours a day) are worked out from the
+  days someone is actually in, so a week off takes them down too. Type over
+  either to change one; clear it to go back
+- **Hours left** is total capacity less every hour booked: what that person
+  can still take on. The panel above ranks everyone by it and names anyone
+  booked past their hours
+- **Work** is any task in the team, by key, or anything else by name —
+  another project's ticket, support. "Add the sprint's tasks" puts every
+  task in the sprint on at once
+
+Vacation is not stored on the sheet. It is the same availability Sprint
+planning reads, in hours instead of days, so the forecast there and the
+hours here never disagree about who is out — and, like the days, it goes
+in half days. A sprint's rates start from the team's last sheet, so a team
+on 7.5-hour days only says so once. Deleting a sprint takes its sheet with
+it, and someone who has left the team still shows on the sprints they had
+hours in.
 
 ## Sheets
 

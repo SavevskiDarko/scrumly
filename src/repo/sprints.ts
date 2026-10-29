@@ -148,11 +148,13 @@ export const sprints = {
   },
 
   async remove(id: ID) {
-    await db.transaction('rw', db.sprints, db.tasks, db.sprintEvents, db.availability, async () => {
+    await db.transaction('rw', [db.sprints, db.tasks, db.sprintEvents, db.availability, db.teamCapacity], async () => {
       const inSprint = await db.tasks.where('sprintId').equals(id).toArray()
       for (const t of inSprint) await taskRepo.setSprint(t.id, null)
-      // Availability only means anything for the sprint it was entered against.
+      // Availability only means anything for the sprint it was entered against,
+      // and so do the hours booked in it.
       await db.availability.where('sprintId').equals(id).delete()
+      await db.teamCapacity.where('sprintId').equals(id).delete()
       await db.sprints.delete(id)
     })
   },

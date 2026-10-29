@@ -25,6 +25,8 @@ export { notes, NOTE_TYPES, actionOutcomes } from './notes'
 export type { ActionOutcome } from './notes'
 export { availability, capacityPlan } from './planning'
 export type { CapacityPlan, CapacityRow } from './planning'
+export { capacity, capacitySheet, capacityPeopleIds, DEFAULT_RATES } from './capacity'
+export type { CapacityColumn, CapacityField, CapacityLine, CapacityRates, CapacitySheet } from './capacity'
 export {
   links, reaches, dependencyState, worstState, DEPENDENCY_LABEL, DEPENDENCY_HINT,
 } from './links'

@@ -6,7 +6,7 @@ import {
   flowStats, followUps, groupWaitingOn, loadByPerson, ownerFieldFor, ownerOf,
   parseQuickAdd, people, queues, rotate, notes, settings, sprints, sprintStats,
   standups, statuses, tasks, teams, velocity, workingDays, addDays, nextWeekday, runningOrder,
-  actionOutcomes, availability, capacityPlan, dependencyState, links, worstState,
+  actionOutcomes, availability, capacityPlan, capacity, capacitySheet, capacityPeopleIds, dependencyState, links, worstState,
   kpis, boardSeries, readKpi, kpiStatus, kpiSummary, formatKpiValue, pi,
   sheets, parseSheetUrl, embedUrl, browserUrl, signInTarget,
   byDue, followUpDue, externalLinks, webUrl, linkHost, NOT_A_LINK,
@@ -1008,6 +1008,108 @@ async function run() {
   check('deleting a sprint takes its availability with it',
     (await availability.forSprint(scratch.id)).length === 0)
 
+  // ---------- team capacity ----------
+  console.log('\n  -- team capacity --')
+
+  // The same ten working days as pNext, read the way the spreadsheet reads them.
+  const readSheet = async (former: Awaited<ReturnType<typeof people.get>>[] = []) => {
+    const { sheet, rates } = await capacity.read(pTeam.id, pNext.id)
+    return capacitySheet({
+      sprint: (await sprints.get(pNext.id))!,
+      members: await people.listActiveForTeam(pTeam.id),
+      former: former.filter((p) => !!p),
+      sheet, rates,
+      availability: await availability.forSprint(pNext.id),
+      tasks: await tasks.listForTeam(pTeam.id),
+      holidays: (await settings.get()).holidays,
+    })
+  }
+  const lineOf = (s: Awaited<ReturnType<typeof readSheet>>, id: string) => s.lines.find((l) => l.person.id === id)!
+
+  let tc = await readSheet()
+  let anaCap = lineOf(tc, ana.id)
+  check('a sprint nobody has typed into reads like the spreadsheet: 8-hour days, less Others and OH',
+    anaCap.working === 80 && anaCap.others === 5 && anaCap.overhead === 20 && anaCap.capacity === 55 && anaCap.left === 55,
+    JSON.stringify(anaCap))
+  check('and makes no sheet just by being read', !(await capacity.forSprint(pNext.id)))
+
+  await capacity.setVacation(pNext.id, ana.id, 24)
+  anaCap = lineOf(await readSheet(), ana.id)
+  check('three days off take Others and OH down with them', anaCap.vacation === 24 && anaCap.others === 3.5
+    && anaCap.overhead === 14 && anaCap.capacity === 38.5, JSON.stringify(anaCap))
+  check('and are the days Sprint planning reads', (await readPlan()).rows.find((r) => r.person.id === ana.id)!.days === 7)
+  await availability.set(ana.id, pNext.id, 8)
+  check('which Sprint planning can change in turn', lineOf(await readSheet(), ana.id).vacation === 16)
+  await capacity.setVacation(pNext.id, ana.id, 3)
+  check('vacation goes in half days, as the days do', lineOf(await readSheet(), ana.id).vacation === 4)
+  await capacity.setVacation(pNext.id, ana.id, null)
+  check('and clearing it is every day again', (await availability.forSprint(pNext.id)).length === 0)
+  check('none of which wrote a sheet: vacation lives with availability', !(await capacity.forSprint(pNext.id)))
+
+  await capacity.setHours(pNext.id, bo.id, 'unknown', 8)
+  let boCap = lineOf(await readSheet(), bo.id)
+  check('unknown hours come off before Others and OH are worked out', boCap.others === 4.5 && boCap.overhead === 18
+    && boCap.capacity === 49.5, JSON.stringify(boCap))
+  await capacity.setHours(pNext.id, bo.id, 'others', 0)
+  boCap = lineOf(await readSheet(), bo.id)
+  check('a number typed over Others wins, zero included', boCap.others === 0 && boCap.othersTyped && boCap.capacity === 54)
+  await capacity.setHours(pNext.id, bo.id, 'others', null)
+  check('and clearing it works it out again', lineOf(await readSheet(), bo.id).others === 4.5)
+  check('negative hours are refused', !(await capacity.setHours(pNext.id, bo.id, 'unknown', -2)).ok)
+
+  const byKey = await capacity.addItem(pNext.id, n1.key.toLowerCase())
+  check('a task key, in any case, books against that task', byKey.ok && byKey.item?.taskId === n1.id && byKey.item.label === n1.key)
+  check('and goes on once', !(await capacity.addItem(pNext.id, n1.key)).ok)
+  const outside = await capacity.addItem(pNext.id, 'GPSUP-14977')
+  check('another project\'s ticket is kept as typed', outside.ok && outside.item?.taskId === null && outside.item.label === 'GPSUP-14977')
+  check('nothing typed is refused', !(await capacity.addItem(pNext.id, '  ')).ok)
+  check('the rest of the sprint comes in with one call, once',
+    (await capacity.addSprintTasks(pNext.id)) === 2 && (await capacity.addSprintTasks(pNext.id)) === 0)
+
+  await capacity.book(pNext.id, byKey.item!.id, bo.id, 16)
+  await capacity.book(pNext.id, outside.item!.id, bo.id, 40)
+  tc = await readSheet()
+  boCap = lineOf(tc, bo.id)
+  check('booked hours come off what is left, past zero if need be', boCap.booked === 56 && boCap.left === -6.5, JSON.stringify(boCap))
+  const n1Col = tc.columns.find((c) => c.item.id === byKey.item!.id)!
+  check('each column adds up its own hours', n1Col.total === 16 && n1Col.task?.id === n1.id)
+  check('and the totals add up everyone', tc.totals.booked === 56 && tc.totals.capacity === 104.5 && tc.totals.left === 48.5,
+    JSON.stringify(tc.totals))
+  await capacity.book(pNext.id, outside.item!.id, bo.id, 0)
+  check('zero takes the hours off', lineOf(await readSheet(), bo.id).booked === 16)
+  await capacity.removeItem(pNext.id, outside.item!.id)
+  check('a column can come off the sheet', (await capacity.forSprint(pNext.id))!.items.length === 3)
+
+  const cy = await people.create({ name: 'Cy Leaver', teamIds: [pTeam.id] })
+  await capacity.book(pNext.id, byKey.item!.id, cy.id, 8)
+  await people.setTeams(cy.id, [])
+  const formerIds = capacityPeopleIds(await capacity.forSprint(pNext.id))
+  tc = await readSheet(await Promise.all(formerIds.map((id) => people.get(id))))
+  check('someone who left the team still shows on the sprint they have hours in',
+    formerIds.includes(cy.id) && lineOf(tc, cy.id)?.member === false && tc.columns.find((c) => c.item.id === byKey.item!.id)!.total === 24)
+
+  check('a day longer than 24 hours is refused', !(await capacity.setRates(pNext.id, { hoursPerDay: 25 })).ok)
+  check('so are more Others and OH than the day has', !(await capacity.setRates(pNext.id, { othersPerDay: 5, overheadPerDay: 4 })).ok)
+  await capacity.setRates(pNext.id, { hoursPerDay: 7.5 })
+  anaCap = lineOf(await readSheet(), ana.id)
+  check('a shorter day changes every hour', anaCap.working === 75 && anaCap.capacity === 50, JSON.stringify(anaCap))
+  const pLater = await sprints.plan({ teamId: pTeam.id, lengthDays: 14 })
+  check('the next sprint starts from the same rates', (await capacity.read(pTeam.id, pLater.id)).rates.hoursPerDay === 7.5)
+  await capacity.setHours(pLater.id, ana.id, 'unknown', 4)
+  const laterSheet = await capacity.forSprint(pLater.id)
+  check('and gets a sheet of its own once something is typed', laterSheet?.hoursPerDay === 7.5
+    && laterSheet.items.length === 0 && laterSheet.id !== (await capacity.forSprint(pNext.id))!.id)
+  await sprints.remove(pLater.id)
+  check('deleting a sprint takes its sheet with it', !(await capacity.forSprint(pLater.id)))
+
+  const snapC = await backup.snapshot()
+  check('backups carry the capacity sheets', snapC.tables.teamCapacity.length === 1, `${snapC.tables.teamCapacity.length}`)
+  check('a backup from before capacity restores with none',
+    (await backup.restore({ ...snapC, schemaVersion: 6, tables: { ...snapC.tables, teamCapacity: undefined } } as never)).ok
+    && (await db.teamCapacity.count()) === 0)
+  await backup.restore(snapC)
+  check('and a new one brings them back', (await db.teamCapacity.count()) === 1)
+
   // ---------- dependencies ----------
   console.log('\n  -- dependencies --')
 
@@ -1685,6 +1787,8 @@ async function run() {
   const workSheet = await sheets.add({ url: sheetUrl(41), title: 'Payments capacity', teamId: jTeam.id })
   const homeSheet = await sheets.add({ url: sheetUrl(42), title: 'Home budget', teamId: home.id })
   const anySheet = await sheets.add({ url: sheetUrl(43), title: 'Everyone', teamId: null })
+  await capacity.addItem(jSprints[0].id, 'PAY-2')
+  const jCapacity = (await capacity.forSprint(jSprints[0].id))!
 
   check('nothing is kept back until a team asks', (await currentScope()).empty)
   const everything = await backup.snapshot()
@@ -1707,6 +1811,7 @@ async function run() {
     !kept.has('teams', home.id) && !kept.has('tasks', homeTask.id) && !kept.has('notes', homeNote.id))
   check('its sheet links stay, and nobody else\'s', workSheet.ok && kept.has('sheets', workSheet.sheet.id)
     && homeSheet.ok && !kept.has('sheets', homeSheet.sheet.id) && anySheet.ok && !kept.has('sheets', anySheet.sheet.id))
+  check('and so does its capacity sheet', kept.has('teamCapacity', jCapacity.id) && jCapacity.items[0]?.label === 'PAY-2')
   check('the switch queued all of it for the cloud',
     tracker.has('teams', jTeam.id) && tracker.has('tasks', pay2.id) && tracker.has('people', ben!.id) && !tracker.has('tasks', homeTask.id))
 

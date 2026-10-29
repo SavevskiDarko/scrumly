@@ -1,7 +1,7 @@
 import { db } from '../db/schema'
 import type {
   Availability, Blocker, BoardLink, Chase, Conversion, ExternalLink, FollowUp, ID, Kpi, KpiEntry, Note, Person,
-  PiObjective, PiVote, Sheet, Sprint, SprintEvent, Standup, StandupNote, StatusEvent, Task, TaskLink, Team,
+  PiObjective, PiVote, Sheet, Sprint, SprintEvent, Standup, StandupNote, StatusEvent, Task, TaskLink, Team, TeamCapacity,
 } from '../db/types'
 
 /*
@@ -35,7 +35,7 @@ export interface LocalScope {
 export const SCOPED_TABLES = [
   'teams', 'people', 'sprints', 'tasks', 'statusEvents', 'sprintEvents', 'externalLinks', 'taskLinks',
   'blockers', 'chases', 'availability', 'standups', 'standupNotes', 'piObjectives', 'piVotes',
-  'notes', 'followUps', 'conversions', 'boardLinks', 'kpis', 'kpiEntries', 'sheets',
+  'notes', 'followUps', 'conversions', 'boardLinks', 'kpis', 'kpiEntries', 'sheets', 'teamCapacity',
 ] as const
 
 const NONE: ReadonlySet<string> = new Set()
@@ -100,6 +100,8 @@ export function scopeOf(tables: TableRows): LocalScope {
 
   // Only the link, but a company's sheet ids are the company's too.
   take<Sheet>('sheets', (s) => within(teams, s.teamId))
+  // Its columns are that team's ticket keys, and its rows that team's people.
+  take<TeamCapacity>('teamCapacity', (c) => teams.has(c.teamId) || sprints.has(c.sprintId))
 
   return scope(kept)
 }

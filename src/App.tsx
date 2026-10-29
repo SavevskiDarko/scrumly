@@ -15,6 +15,7 @@ import { PasteTasks } from './components/PasteTasks'
 import { PersonDrawer } from './components/PersonDrawer'
 import { Blockers } from './screens/Blockers'
 import { Boards } from './screens/Boards'
+import { Capacity } from './screens/Capacity'
 import { Notes } from './screens/Notes'
 import { Sprints } from './screens/Sprints'
 import { Board } from './screens/Board'
@@ -107,6 +108,7 @@ function Inner() {
   else if (route.screen === 'notes') screen = <Notes teamId={team.id} />
   else if (route.screen === 'sprints') screen = <Sprints teamId={team.id} />
   else if (route.screen === 'planning') screen = <Planning teamId={team.id} />
+  else if (route.screen === 'capacity') screen = <Capacity teamId={team.id} />
   else if (route.screen === 'pi') screen = <PiPlanning />
   else if (route.screen === 'canvas') {
     const boardId = route.params.get('board')

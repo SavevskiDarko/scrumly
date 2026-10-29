@@ -2,10 +2,10 @@ import Dexie, { type Table } from 'dexie'
 import type {
   Availability, Blocker, Board, BoardLink, Chase, Conversion, ExternalLink, FollowUp, Kpi, KpiEntry,
   Note, Person, PiObjective, PiRisk, PiVote, Process, ProcessRun, ProgramIncrement, Settings,
-  Sheet, Sprint, SprintEvent, Standup, StandupNote, Status, StatusEvent, Task, TaskLink, Team,
+  Sheet, Sprint, SprintEvent, Standup, StandupNote, Status, StatusEvent, Task, TaskLink, Team, TeamCapacity,
 } from './types'
 
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 export class ScrumlyDB extends Dexie {
   settings!: Table<Settings, number>
@@ -37,6 +37,7 @@ export class ScrumlyDB extends Dexie {
   kpis!: Table<Kpi, string>
   kpiEntries!: Table<KpiEntry, string>
   sheets!: Table<Sheet, string>
+  teamCapacity!: Table<TeamCapacity, string>
 
   constructor() {
     // The IndexedDB database is still called 'cadence' — the app's first name.
@@ -108,6 +109,11 @@ export class ScrumlyDB extends Dexie {
     this.version(6).stores({
       sheets: 'id, teamId, createdAt',
     })
+
+    // v7 — Team capacity: each sprint's hours per person, and what they are booked on.
+    this.version(7).stores({
+      teamCapacity: 'id, sprintId, teamId, updatedAt',
+    })
   }
 }
 
@@ -119,5 +125,5 @@ export const ALL_TABLE_NAMES = [
   'boardLinks', 'notes', 'followUps', 'processes', 'processRuns', 'standups',
   'sprintEvents', 'conversions', 'standupNotes',
   'programIncrements', 'piObjectives', 'piRisks', 'piVotes',
-  'kpis', 'kpiEntries', 'sheets',
+  'kpis', 'kpiEntries', 'sheets', 'teamCapacity',
 ] as const
