@@ -5,10 +5,9 @@ import { useToast } from '../components/Toast'
 import { db } from '../db/schema'
 import type { Conversion, FollowUp, Note, NoteType, Sprint, Status, Task } from '../db/types'
 import { setParam, useRoute } from '../hooks/useRoute'
-import { useTeamPeople } from '../hooks/useTeamPeople'
 import { formatDate } from '../lib/dates'
 import {
-  NOTE_TYPES, actionOutcomes, followUps as fuRepo, notes as repo, sprints as sprintRepo, todayISO,
+  NOTE_TYPES, actionOutcomes, followUps as fuRepo, notes as repo, sprints as sprintRepo, teams as teamRepo, todayISO,
 } from '../repo'
 
 const labelOf = (t: NoteType) => NOTE_TYPES.find((x) => x.value === t)?.label ?? t
@@ -130,17 +129,24 @@ export function Notes({ teamId }: { teamId: string }) {
   const [sel, setSel] = useState('')
   const areaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Every team's notes, whichever team is open: one person runs them all, and
+  // a retro or a one-to-one should not disappear because the switcher moved.
   const rows = useLiveQuery(() => repo.list(), [], [])
   const statuses = useLiveQuery(() => db.statuses.orderBy('order').toArray(), [], [])
-  const people = useTeamPeople(teamId)
+  const people = useLiveQuery(() => db.people.filter((p) => p.active).sortBy('name'), [], [])
+  const teams = useLiveQuery(() => teamRepo.list(), [], [])
   const note = useLiveQuery(async () => (selected ? await repo.get(selected) : undefined), [selected])
   const conversions = useLiveQuery(async () => (selected ? await repo.conversionsFor(selected) : []), [selected], [] as Conversion[])
   const tasks = useLiveQuery(() => db.tasks.toArray(), [], [])
   const follow = useLiveQuery(() => db.followUps.toArray(), [], [])
   const teamSprints = useLiveQuery(() => sprintRepo.listForTeam(teamId), [teamId], [] as Sprint[])
+  // A note belongs to the team it was written for, not the one open now: its
+  // sprint picker and the board its tasks land on follow it.
+  const noteTeamId = note?.teamId ?? teamId
+  const noteSprints = useLiveQuery(() => sprintRepo.listForTeam(noteTeamId), [noteTeamId], [] as Sprint[])
+  const teamName = new Map(teams.map((t) => [t.id, t.name]))
 
-  const mine = rows.filter((n) => n.teamId === teamId || n.teamId === null)
-  const visible = filter === 'all' ? mine : mine.filter((n) => n.type === filter)
+  const visible = filter === 'all' ? rows : rows.filter((n) => n.type === filter)
 
   // Arriving from a sprint's Retro button names the note to open.
   useEffect(() => { if (wanted) { setSelected(wanted); setFilter('all') } }, [wanted])
@@ -182,7 +188,7 @@ export function Notes({ teamId }: { teamId: string }) {
   async function convert(to: 'task' | 'followUp') {
     if (!note) return
     const result = await repo.convert(note.id, sel, to, {
-      teamId,
+      teamId: noteTeamId,
       statusId: statuses[0]?.id,
       personId: note.personId,
     })
@@ -226,6 +232,9 @@ export function Notes({ teamId }: { teamId: string }) {
                 <span className="chip">{labelOf(n.type)}</span>
                 <span className="small faint">{formatDate(n.updatedAt)}</span>
                 {n.isPrivate && <span className="chip solid">private</span>}
+                {teams.length > 1 && n.teamId && teamName.has(n.teamId) && (
+                  <span className="chip" style={{ marginLeft: 'auto' }}>{teamName.get(n.teamId)}</span>
+                )}
               </div>
               <b style={{ fontSize: 12.5, marginTop: 4, display: 'block' }}>{n.title}</b>
               <span className="small faint" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -254,7 +263,7 @@ export function Notes({ teamId }: { teamId: string }) {
                   <select className="select" style={{ width: 140 }} value={note.sprintId ?? ''} title="Which sprint this retro is about"
                     onChange={(e) => repo.update(note.id, { sprintId: e.target.value || null })}>
                     <option value="">No sprint</option>
-                    {[...teamSprints].reverse().map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    {[...noteSprints].reverse().map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 )}
                 <label className="small faint" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

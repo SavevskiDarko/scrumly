@@ -435,32 +435,37 @@ const SPECS: ToolSpec[] = [
     }),
 
   tool('read_notes',
-    'The user\'s notes — retros, meetings, ideas, improvements, one-to-ones not marked private — newest first. '
-    + 'A retro comes with what each of its actions turned into and whether that is done. Private notes are never shown.',
+    'The user\'s notes from every team — retros, meetings, ideas, improvements, one-to-ones not marked private — newest '
+    + 'first. A retro comes with what each of its actions turned into and whether that is done. Private notes are never shown.',
     {
       type: { type: 'string', enum: NOTE_KINDS, description: 'Only notes of this kind.' },
       text: str('Words to look for in the title or body.'),
       limit: { type: 'integer', description: 'Default 5, at most 15.' },
-      team: TEAM,
+      team: str('Only this team\'s notes. Leave out for every team\'s, as on the Notes screen.'),
     }, [],
     async (a, w) => {
-      const team = teamFor(w, text(a, 'team'))
+      const named = text(a, 'team')
+      const team = named ? teamFor(w, named) : null
       const kind = oneOf(a, 'type', NOTE_KINDS)
       const words = text(a, 'text')?.toLowerCase()
       const limit = num(a, 'limit', { min: 1, max: 15 }) ?? 5
       const list = (await noteRepo.list())
         .filter((n) => readableNote(n) && w.sight.sees('notes', n.id))
-        // A note with no team is everyone's, as on the Notes screen.
-        .filter((n) => n.teamId === null || n.teamId === team.id)
+        // A note with no team is everyone's, so it stays in when one team is asked for.
+        .filter((n) => !team || n.teamId === null || n.teamId === team.id)
         .filter((n) => !kind || n.type === kind)
         .filter((n) => !words || `${n.title}\n${n.body}`.toLowerCase().includes(words))
         .slice(0, limit)
-      if (!list.length) return read(`No ${kind ?? ''} notes${words ? ` mentioning "${words}"` : ''} for ${team.name}.`, 'Looked through notes')
+      if (!list.length) {
+        return read(`No ${kind ?? ''} notes${words ? ` mentioning "${words}"` : ''}${team ? ` for ${team.name}` : ''}.`, 'Looked through notes')
+      }
+      const teamName = new Map(w.sight.teams.map((t) => [t.id, t.name]))
       const statuses = await db.statuses.toArray()
       const doneIds = new Set(statuses.filter((s) => s.isDone).map((s) => s.id))
       const out: string[] = []
       for (const n of list) {
-        out.push(`### ${n.title} (${n.type}, ${todayISO(new Date(n.createdAt))})`, n.body.trim().slice(0, 4000) || '(empty)')
+        const whose = n.teamId && teamName.has(n.teamId) ? `, ${teamName.get(n.teamId)}` : ''
+        out.push(`### ${n.title} (${n.type}${whose}, ${todayISO(new Date(n.createdAt))})`, n.body.trim().slice(0, 4000) || '(empty)')
         const conv = await noteRepo.conversionsFor(n.id)
         if (conv.length) {
           const made = await db.tasks.where('id').anyOf(conv.map((c) => c.createdId)).toArray()
