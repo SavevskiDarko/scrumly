@@ -18,7 +18,7 @@ import { formatDate, parseDateInput } from '../src/lib/dates'
 import { createRequire } from 'node:module'
 import type { JiraBridge } from '../src/desktop/bridge'
 import {
-  autoColumn, jiraLinks, jiraTime, plainText, priorityFrom, type JiraBoardConfig, type JiraIssue, type JiraStatus,
+  autoColumn, jiraLinks, jiraTime, plainText, priorityFrom, sizeFrom, type JiraBoardConfig, type JiraIssue, type JiraStatus,
 } from '../src/repo/jira'
 import { pullTeam } from '../src/jira/pull'
 import type { Task } from '../src/db/types'
@@ -1531,6 +1531,9 @@ async function run() {
     type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Pay' }, { type: 'text', text: ' now' }] },
       { type: 'paragraph', content: [{ type: 'text', text: 'Second' }] }],
   }) === 'Pay now\nSecond')
+  check('a board that estimates in time sizes in hours, not seconds',
+    sizeFrom(28800, 'timeoriginalestimate') === 8 && sizeFrom(5400, 'timeestimate') === 1.5)
+  check('a points board keeps its points', sizeFrom(5, 'customfield_10016') === 5 && sizeFrom(null, 'customfield_10016') === null)
 
   const { normaliseSite } = createRequire(import.meta.url)('../electron/jira.cjs') as { normaliseSite(s: string): string }
   check('a bare Cloud host becomes an https address', normaliseSite('acme.atlassian.net') === 'https://acme.atlassian.net')
@@ -1588,7 +1591,7 @@ async function run() {
     fields: {
       summary: 'Refund flow', status: { id: '3', name: 'In Progress', statusCategory: { key: 'indeterminate' } },
       assignee: { accountId: 'acc-ben', displayName: 'Ben Builder' }, priority: { name: 'Medium' },
-      created: t('02T08:00:00'), updated: t('13T18:00:00'), customfield_10016: 3,
+      created: t('02T08:00:00'), updated: t('13T18:00:00'), customfield_10016: 3, timeoriginalestimate: 28800,
       sprint: { id: 102 }, closedSprints: [{ id: 101 }],
     },
     // Created straight into sprint 1, carried into sprint 2 when it closed.
@@ -1607,7 +1610,7 @@ async function run() {
     id: '1004', key: 'PAY-4',
     fields: {
       summary: 'Spike that gets deleted', status: { id: '1', name: 'To Do', statusCategory: { key: 'new' } },
-      created: t('16T09:00:00'), updated: t('16T09:00:00'), sprint: { id: 102 },
+      created: t('16T09:00:00'), updated: t('16T09:00:00'), sprint: { id: 102 }, timeoriginalestimate: 5400,
     },
     changelog: { total: 0, histories: [] },
   }
@@ -1676,6 +1679,8 @@ async function run() {
   check('the first pull works', first.ok, first.message)
   check('it asks for the board\'s own points field',
     jira.requests.some((r) => r.startsWith('/rest/agile/1.0/sprint/101/issue') && r.includes('customfield_10016')))
+  check('and for the Original estimate, whatever the board estimates in',
+    jira.requests.some((r) => r.startsWith('/rest/agile/1.0/sprint/101/issue') && r.includes('timeoriginalestimate')))
   check('and pages through a long sprint', jira.requests.filter((r) => r.startsWith('/rest/agile/1.0/sprint/102/issue')).length === 2)
 
   const jSprints = (await sprints.listForTeam(jTeam.id))
@@ -1691,6 +1696,8 @@ async function run() {
   check('issues keep their Jira keys', ['PAY-1', 'PAY-2', 'PAY-3', 'PAY-4'].every((k) => jt(k)), jTasks.map((x) => x.key).join())
   check('status maps by name', jt('PAY-1').statusId === colNamed('Done').id && jt('PAY-3').statusId === colNamed('To do').id)
   check('size comes from the board\'s estimation field', jt('PAY-1').size === 5 && jt('PAY-3').size === null)
+  check('the Original estimate comes across in hours', jt('PAY-2').estimateHours === 8 && jt('PAY-4').estimateHours === 1.5)
+  check('and is left off an issue without one', !('estimateHours' in jt('PAY-3')))
   check('priority and labels come across', jt('PAY-1').priority === 'high' && jt('PAY-1').tags.join() === 'api')
   check('a description tree becomes text', jt('PAY-3').description === 'Show the total')
   check('finished work stays in the sprint it finished in', jt('PAY-1').sprintId === js('JS 1').id && jt('PAY-1').closedAt !== null)
@@ -1724,6 +1731,42 @@ async function run() {
 
   const unchanged = await pullTeam(jTeam.id, fakeJira())
   check('pulling an unchanged board writes nothing', unchanged.ok && unchanged.written === 0 && unchanged.deleted === 0, unchanged.message)
+
+  // Team capacity for the running sprint, with nothing typed in: PAY-2 is
+  // Ben's, 8 hours; PAY-4 is estimated at 1.5 and nobody's.
+  const readJiraSheet = async () => {
+    const { sheet, rates } = await capacity.read(jTeam.id, js('JS 2').id)
+    return capacitySheet({
+      sprint: (await sprints.get(js('JS 2').id))!, members: await people.listActiveForTeam(jTeam.id),
+      sheet, rates, availability: [], tasks: await tasks.listForTeam(jTeam.id),
+    })
+  }
+  const benLine = (s: Awaited<ReturnType<typeof readJiraSheet>>) => s.lines.find((l) => l.person.id === ben!.id)!
+  const pay2Col = (s: Awaited<ReturnType<typeof readJiraSheet>>) => s.columns.find((c) => c.task?.key === 'PAY-2')!
+  let jSheet = await readJiraSheet()
+  check('an estimated ticket in the sprint is on the sheet by itself, its hours on the assignee',
+    benLine(jSheet).booked === 8 && pay2Col(jSheet).estimate?.personId === ben!.id && !pay2Col(jSheet).stored,
+    JSON.stringify(benLine(jSheet)))
+  check('which is what is left comes off', benLine(jSheet).left === benLine(jSheet).capacity - 8)
+  check('hours nobody is assigned are called out, not booked to anyone',
+    jSheet.unassigned.map((c) => c.item.label).join() === 'PAY-4' && pay2Col(jSheet).total === 8
+    && jSheet.fromJira.tasks === 2 && jSheet.fromJira.hours === 9.5, JSON.stringify(jSheet.fromJira))
+  check('and none of it makes a sheet just by being read', !(await capacity.forSprint(js('JS 2').id)))
+  check('the sprint\'s estimated tickets are not added a second time', (await capacity.addSprintTasks(js('JS 2').id)) === 0)
+
+  await capacity.bookTask(js('JS 2').id, jt('PAY-2').id, anaJ.id, 2)
+  const pay2Item = (await capacity.forSprint(js('JS 2').id))!.items.find((i) => i.taskId === jt('PAY-2').id)!
+  await capacity.book(js('JS 2').id, pay2Item.id, ben!.id, 3)
+  jSheet = await readJiraSheet()
+  check('someone else\'s hours typed on an estimated ticket save its column',
+    pay2Col(jSheet).stored && pay2Col(jSheet).hours[anaJ.id] === 2 && pay2Col(jSheet).total === 10, JSON.stringify(pay2Col(jSheet)))
+  check('but the assignee\'s hours stay Jira\'s', benLine(jSheet).booked === 8)
+
+  issueB.fields.timeoriginalestimate = 36000
+  await pullTeam(jTeam.id, fakeJira())
+  check('re-estimated in Jira, the next pull moves the hours', benLine(await readJiraSheet()).booked === 10)
+  issueB.fields.timeoriginalestimate = 28800
+  await pullTeam(jTeam.id, fakeJira())
 
   await tasks.move(jt('PAY-1').id, colNamed('To do').id, null)
   await tasks.update(jt('PAY-1').id, { reviewerId: anaJ.id, title: 'Renamed here' })

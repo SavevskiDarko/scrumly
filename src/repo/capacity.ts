@@ -11,6 +11,12 @@ import { workingDays } from './sprints'
  * is what each person has for sprint work. Less what is already booked against
  * named tickets, it is what they can still take on.
  *
+ * A ticket with an Original estimate in Jira books itself: it is on the sheet
+ * as soon as it is in the sprint, its hours on whoever Jira has it assigned to.
+ * That is worked out every time the sheet is read, not saved, so a ticket
+ * re-estimated or handed to someone else in Jira moves its hours on the next
+ * pull. Only hours typed in are stored.
+ *
  * Leave is not stored here. It is the availability Sprint planning already
  * reads, in hours instead of days, so the forecast there and the hours here
  * never disagree about who is out.
@@ -143,15 +149,18 @@ export const capacity = {
     return done.ok ? { ok: true, item } : done
   },
 
-  /** Every task in the sprint that is not on the sheet yet, in key order. Returns how many were added. */
+  /**
+   * Every task in the sprint that is not on the sheet yet, in key order.
+   * Returns how many were added. Tasks Jira estimates are on it already.
+   */
   async addSprintTasks(sprintId: ID): Promise<number> {
     const inSprint = (await db.tasks.where('sprintId').equals(sprintId).toArray())
-      .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }))
+      .sort(byKey)
     let added = 0
     await edit(sprintId, (sheet) => {
       const have = new Set(sheet.items.map((i) => i.taskId))
       for (const t of inSprint) {
-        if (have.has(t.id)) continue
+        if (have.has(t.id) || estimated(t)) continue
         sheet.items.push({ id: newId(), taskId: t.id, label: t.key, hours: {} })
         added++
       }
@@ -170,16 +179,43 @@ export const capacity = {
     else item.hours[personId] = clean
   }),
 
+  /**
+   * Hours on a task's column. A task Jira estimates is on the sheet before
+   * anything is typed on it, so the first hours typed there, a tester's say,
+   * are what save its column.
+   */
+  async bookTask(sprintId: ID, taskId: ID, personId: ID, hours: number | null): Promise<Result> {
+    const clean = cleanHours(hours)
+    if (clean === 'bad') return { ok: false, reason: 'Hours are a number, zero or more' }
+    const task = await db.tasks.get(taskId)
+    if (!task) return { ok: false, reason: 'That task is gone' }
+    const saved = (await sheetFor(sprintId))?.items.find((i) => i.taskId === taskId)
+    if (saved) return capacity.book(sprintId, saved.id, personId, clean)
+    if (clean == null) return { ok: true }
+    return edit(sprintId, (sheet) => {
+      sheet.items.push({ id: newId(), taskId, label: task.key, hours: { [personId]: clean } })
+    })
+  },
+
   removeItem: (sprintId: ID, itemId: ID) => edit(sprintId, (sheet) => {
     sheet.items = sheet.items.filter((i) => i.id !== itemId)
   }),
 }
 
-/** Everyone the sheet has hours for, so someone who has left the team still shows on the sprints they worked. */
-export function capacityPeopleIds(sheet: TeamCapacity | null): ID[] {
-  if (!sheet) return []
-  const ids = new Set(Object.keys(sheet.people))
-  for (const item of sheet.items) for (const id of Object.keys(item.hours)) ids.add(id)
+const byKey = (a: Task, b: Task) => a.key.localeCompare(b.key, undefined, { numeric: true })
+
+/** Has an Original estimate from Jira, so its hours book themselves. */
+const estimated = (t: Task) => (t.estimateHours ?? 0) > 0
+
+/**
+ * Everyone the sheet has hours for, so someone who has left the team still
+ * shows on the sprints they worked. With the sprint's tasks, that includes
+ * whoever Jira has an estimated one assigned to.
+ */
+export function capacityPeopleIds(sheet: TeamCapacity | null, sprintTasks: Task[] = []): ID[] {
+  const ids = new Set(Object.keys(sheet?.people ?? {}))
+  for (const item of sheet?.items ?? []) for (const id of Object.keys(item.hours)) ids.add(id)
+  for (const t of sprintTasks) if (estimated(t) && t.assigneeId) ids.add(t.assigneeId)
   return [...ids]
 }
 
@@ -206,6 +242,12 @@ export interface CapacityColumn {
   item: CapacityItem
   /** Null for work that is not a task here, or a task since deleted. */
   task: Task | null
+  /** Person id -> hours on it: what was typed, with Jira's estimate on the assignee in place of anything typed for them. */
+  hours: Record<ID, number>
+  /** Jira's Original estimate and who it is booked to; a null person is a ticket nobody is assigned. Null without one. */
+  estimate: { hours: number; personId: ID | null } | null
+  /** False for a column here only because Jira estimates the task: nothing typed on it is saved yet. */
+  stored: boolean
   total: number
 }
 
@@ -215,6 +257,12 @@ export interface CapacitySheet {
   lines: CapacityLine[]
   columns: CapacityColumn[]
   totals: Pick<CapacityLine, 'working' | 'unknown' | 'vacation' | 'others' | 'overhead' | 'capacity' | 'booked' | 'left'>
+  /** Jira's Original estimates in the sprint: how many tickets, and their hours. */
+  fromJira: { tasks: number; hours: number }
+  /** Estimated tickets with nobody assigned in Jira: hours nobody is booked for. */
+  unassigned: CapacityColumn[]
+  /** Jira tickets in the sprint with no Original estimate, so none of their hours book themselves. */
+  unestimated: Task[]
 }
 
 /**
@@ -237,7 +285,23 @@ export function capacitySheet(input: {
   const { sprint, sheet } = input
   const rates = sheet ? ratesOf(sheet) : input.rates
   const wd = workingDays(sprint.startDate, sprint.endDate, input.holidays ?? []).length
-  const items = sheet?.items ?? []
+  const byId = new Map(input.tasks.map((t) => [t.id, t]))
+  const inSprint = input.tasks.filter((t) => t.sprintId === sprint.id)
+  const saved = sheet?.items ?? []
+  const savedTaskIds = new Set(saved.map((i) => i.taskId))
+  // Estimated tickets nothing has been typed on yet are on the sheet all the
+  // same, after the columns put there by hand.
+  const unsaved = inSprint.filter((t) => estimated(t) && !savedTaskIds.has(t.id)).sort(byKey)
+    .map((t): CapacityItem => ({ id: `estimate-${t.id}`, taskId: t.id, label: t.key, hours: {} }))
+  const items = [...saved, ...unsaved].map((item, i) => {
+    const task = item.taskId ? byId.get(item.taskId) ?? null : null
+    // Only while it is in this sprint: a ticket carried on books its hours in the next one.
+    const estimate = task && task.sprintId === sprint.id && estimated(task)
+      ? { hours: task.estimateHours!, personId: task.assigneeId }
+      : null
+    const hours = estimate?.personId ? { ...item.hours, [estimate.personId]: estimate.hours } : item.hours
+    return { item, task, hours, estimate, stored: i < saved.length }
+  })
   const memberIds = new Set(input.members.map((m) => m.id))
   const people = [
     ...input.members.map((person) => ({ person, member: true })),
@@ -254,7 +318,7 @@ export function capacitySheet(input: {
     const others = typed.others ?? daysIn * rates.othersPerDay
     const overhead = typed.overhead ?? daysIn * rates.overheadPerDay
     const cap = working - unknown - vacation - others - overhead
-    const booked = items.reduce((sum, i) => sum + (i.hours[person.id] ?? 0), 0)
+    const booked = items.reduce((sum, c) => sum + (c.hours[person.id] ?? 0), 0)
     return {
       person, member,
       working: r2(working), unknown: r2(unknown), vacation: r2(vacation),
@@ -265,12 +329,11 @@ export function capacitySheet(input: {
   })
 
   const shown = new Set(lines.map((l) => l.person.id))
-  const byId = new Map(input.tasks.map((t) => [t.id, t]))
-  const columns: CapacityColumn[] = items.map((item) => ({
-    item,
-    task: item.taskId ? byId.get(item.taskId) ?? null : null,
-    total: r2(Object.entries(item.hours).reduce((sum, [id, h]) => sum + (shown.has(id) ? h : 0), 0)),
+  const columns: CapacityColumn[] = items.map((c) => ({
+    ...c,
+    total: r2(Object.entries(c.hours).reduce((sum, [id, h]) => sum + (shown.has(id) ? h : 0), 0)),
   }))
+  const fromJira = columns.filter((c) => c.estimate)
 
   const sum = (k: keyof CapacitySheet['totals']) => r2(lines.reduce((s, l) => s + l[k], 0))
   return {
@@ -282,5 +345,8 @@ export function capacitySheet(input: {
       working: sum('working'), unknown: sum('unknown'), vacation: sum('vacation'), others: sum('others'),
       overhead: sum('overhead'), capacity: sum('capacity'), booked: sum('booked'), left: sum('left'),
     },
+    fromJira: { tasks: fromJira.length, hours: r2(fromJira.reduce((s, c) => s + c.estimate!.hours, 0)) },
+    unassigned: fromJira.filter((c) => !c.estimate!.personId),
+    unestimated: inSprint.filter((t) => t.jira && !estimated(t)).sort(byKey),
   }
 }

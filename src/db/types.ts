@@ -115,6 +115,11 @@ export interface Task {
   statusId: ID
   priority: Priority
   size: number | null
+  /**
+   * Jira's Original estimate, in hours. Absent when the issue has none, and on
+   * every task made here. Team capacity books it to the assignee.
+   */
+  estimateHours?: number
   dueDate: string | null
   project: string | null
   tags: string[]
@@ -125,8 +130,8 @@ export interface Task {
   closedAt: number | null
   /**
    * The Jira issue this mirrors. Jira owns its title, status, sprint, assignee,
-   * size and dates; reviewer, tester, blockers and dependencies are Scrumly's
-   * own and survive every pull.
+   * size, estimate and dates; reviewer, tester, blockers and dependencies are
+   * Scrumly's own and survive every pull.
    */
   jira?: { id: string; key: string }
 }

@@ -101,6 +101,33 @@ function RateInput({ label, value, unit, title, onSave }: {
   )
 }
 
+/** "PAY-4, PAY-7 and 3 more": enough keys to go and find them, not a wall of them. */
+function someKeys(keys: string[], max = 5): string {
+  if (keys.length <= max) return keys.join(', ')
+  return `${keys.slice(0, max).join(', ')} and ${keys.length - max} more`
+}
+
+/** What the sheet took from Jira, and what it could not: tickets with no estimate, or nobody on them. */
+function fromJira(view: CapacitySheet): string | null {
+  const { fromJira: jira, unassigned, unestimated } = view
+  if (!jira.tasks && !unestimated.length) return null
+  const parts: string[] = []
+  if (jira.tasks) {
+    parts.push(`${h(jira.hours)} h booked from Jira's Original estimate on ${jira.tasks} ticket${jira.tasks === 1 ? '' : 's'}, `
+      + 'each on whoever it is assigned to.')
+  } else {
+    parts.push('None of the sprint\'s Jira tickets has an Original estimate yet, so nothing is booked from Jira.')
+  }
+  if (unassigned.length) {
+    const hours = unassigned.reduce((s, c) => s + c.estimate!.hours, 0)
+    parts.push(`${h(hours)} h on nobody: ${someKeys(unassigned.map((c) => c.item.label))} ${unassigned.length === 1 ? 'has' : 'have'} no assignee.`)
+  }
+  if (jira.tasks && unestimated.length) {
+    parts.push(`No estimate on ${someKeys(unestimated.map((t) => t.key))}.`)
+  }
+  return parts.join(' ')
+}
+
 function verdict(view: CapacitySheet): { text: string; hot: boolean } {
   const { totals, lines } = view
   if (!lines.length) return { text: 'Nobody in this team yet, so there are no hours to plan with.', hot: false }
@@ -149,7 +176,8 @@ export function Capacity({ teamId }: { teamId: string }) {
     () => (sprint ? availRepo.forSprint(sprint.id) : Promise.resolve([] as Availability[])),
     [sprint?.id], [] as Availability[],
   )
-  const formerIds = capacityPeopleIds(read?.sheet ?? null).filter((id) => !members.some((m) => m.id === id))
+  const sprintTasks = sprint ? tasks.filter((t) => t.sprintId === sprint.id) : []
+  const formerIds = capacityPeopleIds(read?.sheet ?? null, sprintTasks).filter((id) => !members.some((m) => m.id === id))
   const former = useLiveQuery(
     async () => (formerIds.length ? (await db.people.bulkGet(formerIds)).filter((p): p is Person => !!p) : []),
     [formerIds.join(',')], [] as Person[],
@@ -162,7 +190,7 @@ export function Capacity({ teamId }: { teamId: string }) {
 
   const doneIds = new Set(statuses.filter((s) => s.isDone).map((s) => s.id))
   const onSheet = new Set(view?.columns.map((c) => c.item.taskId) ?? [])
-  const missing = sprint ? tasks.filter((t) => t.sprintId === sprint.id && !onSheet.has(t.id)).length : 0
+  const missing = sprintTasks.filter((t) => !onSheet.has(t.id)).length
   // The sprint's own work first, then the rest of what is open.
   const pickable = tasks
     .filter((t) => !onSheet.has(t.id) && (t.sprintId === sprint?.id || !doneIds.has(t.statusId)))
@@ -197,6 +225,7 @@ export function Capacity({ teamId }: { teamId: string }) {
     : []
 
   const said = view ? verdict(view) : null
+  const jiraSaid = view ? fromJira(view) : null
   const bookedPct = view && view.totals.capacity > 0 ? Math.min(100, (view.totals.booked / view.totals.capacity) * 100) : 0
   const byRoom = view ? [...view.lines].sort((a, b) => b.left - a.left) : []
 
@@ -230,8 +259,18 @@ export function Capacity({ teamId }: { teamId: string }) {
         <td className={`tc-sum tc-left${l.left < 0 ? ' over' : l.left === 0 ? ' none' : ''}`}>{h(l.left)}</td>
         {view.columns.map((c, i) => (
           <td key={c.item.id} className={i === 0 ? 'tc-first' : undefined}>
-            <HoursCell value={c.item.hours[pid] ?? null} row={row} col={`item-${c.item.id}`}
-              onSave={(v) => capRepo.book(sprint.id, c.item.id, pid, v)} />
+            {c.estimate && c.estimate.personId === pid ? (
+              // Jira's, not typed: changed in Jira, and here on the next pull.
+              <input className="tc-in" readOnly value={h(c.estimate.hours)} data-row={row} data-col={`item-${c.item.id}`}
+                style={{ color: 'var(--accent)', fontWeight: 600, cursor: 'default' }} onKeyDown={moveFocus}
+                title={`Original estimate in Jira, booked to ${l.person.name.split(' ')[0]} because the ticket is assigned to them. `
+                  + 'Change it in Jira; the next pull brings it here.'} />
+            ) : (
+              <HoursCell value={c.hours[pid] ?? null} row={row} col={`item-${c.item.id}`}
+                onSave={(v) => (c.stored || !c.task
+                  ? capRepo.book(sprint.id, c.item.id, pid, v)
+                  : capRepo.bookTask(sprint.id, c.task.id, pid, v))} />
+            )}
           </td>
         ))}
       </>
@@ -296,6 +335,7 @@ export function Capacity({ teamId }: { teamId: string }) {
                   <i className={view.totals.left < 0 ? 'hot' : ''} style={{ width: `${bookedPct}%` }} />
                 </div>
                 <p className="small" style={{ margin: '8px 0 0', color: said.hot ? 'var(--alert)' : 'var(--muted)' }}>{said.text}</p>
+                {jiraSaid && <p className="small faint" style={{ margin: '4px 0 0' }}>{jiraSaid}</p>}
                 <div className="tc-rates small faint">
                   <RateInput label="Day" unit="h" value={view.rates.hoursPerDay} onSave={setRate('hoursPerDay')}
                     title="Hours in a working day" />
@@ -366,12 +406,21 @@ export function Capacity({ teamId }: { teamId: string }) {
                             {c.task
                               ? <button className="linkish" title={c.task.title} onClick={() => setParam('task', c.task!.id)}>{c.task.key}</button>
                               : <span title={c.item.taskId ? 'This task has since been deleted' : 'Not a task in this team'}>{c.item.label}</span>}
-                            <button className="chip-x" title="Take it off the sheet" aria-label={`Take ${c.item.label} off the sheet`}
-                              onClick={() => removeColumn(c.item.id, c.item.label, c.total)}>×</button>
+                            {/* An estimated ticket stays while it is in the sprint; it leaves when Jira moves it out. */}
+                            {!c.estimate && (
+                              <button className="chip-x" title="Take it off the sheet" aria-label={`Take ${c.item.label} off the sheet`}
+                                onClick={() => removeColumn(c.item.id, c.item.label, c.total)}>×</button>
+                            )}
                           </div>
                           <div className="tc-task-title" title={c.task?.title}>
                             {c.task ? c.task.title : c.item.taskId ? 'deleted' : 'not a task here'}
                           </div>
+                          {c.estimate && !c.estimate.personId && (
+                            <div className="tc-task-title" style={{ color: 'var(--alert)' }}
+                              title="Original estimate in Jira, with nobody assigned, so nobody is booked for it">
+                              {h(c.estimate.hours)} h, nobody on it
+                            </div>
+                          )}
                         </th>
                       ))}
                     </tr>
@@ -420,7 +469,9 @@ export function Capacity({ teamId }: { teamId: string }) {
                 Vacation is the days off <button className="linkish" style={{ fontWeight: 500 }}
                   onClick={() => go('planning', { sprint: sprint.state === 'closed' ? null : sprint.id })}>Sprint planning</button> reads,
                 in hours, so it goes in half days. Others and OH are worked out from the days someone is in; type over
-                one to change it, clear it to go back. Enter and the arrow keys move up and down a column.
+                one to change it, clear it to go back. Hours in <span style={{ color: 'var(--accent)', fontWeight: 600 }}>blue</span> are
+                a ticket's Original estimate in Jira, on whoever it is assigned to: change them in Jira. Enter and the
+                arrow keys move up and down a column.
               </p>
             </div>
           </>

@@ -118,6 +118,19 @@ const jiraDay = (value: string | undefined | null): string | null => {
   return ms == null ? null : todayISO(new Date(ms))
 }
 
+/** Jira keeps time in seconds. Two decimals: a quarter hour is 0.25 and nothing longer. */
+export const jiraHours = (seconds: number) => Math.round((seconds / 3600) * 100) / 100
+
+/**
+ * A board can estimate in time instead of points. Its estimation field is then
+ * one of Jira's time fields, in seconds, and the size is the hours, as Jira's
+ * own velocity chart reads it, rather than 28,800 points for an 8-hour ticket.
+ */
+export function sizeFrom(value: unknown, fieldId: string | null): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return fieldId === 'timeoriginalestimate' || fieldId === 'timeestimate' ? jiraHours(value) : value
+}
+
 export function priorityFrom(name: string | null | undefined): Priority {
   const n = (name ?? '').toLowerCase()
   if (/highest|blocker|critical|urgent/.test(n)) return 'urgent'
@@ -387,7 +400,7 @@ export function planImport(pull: JiraPull, local: LocalState): ImportPlan {
     if (!sprintNow && isDone) sprintNow = [...finalList].reverse().find((sid) => sprintFacts.has(sid)) ?? null
 
     const last = events[events.length - 1]
-    const points = pointsField ? f[pointsField] : null
+    const estimate = f.timeoriginalestimate
     tasksOut.push({
       id,
       key: issue.key,
@@ -400,7 +413,10 @@ export function planImport(pull: JiraPull, local: LocalState): ImportPlan {
       testerId: existing?.testerId ?? null,
       statusId: column,
       priority: priorityFrom(f.priority?.name),
-      size: typeof points === 'number' && Number.isFinite(points) ? points : null,
+      size: sizeFrom(pointsField ? f[pointsField] : null, pointsField),
+      // Left off rather than null when there is none, so tasks pulled before
+      // estimates came across read as unchanged and are not all written again.
+      ...(typeof estimate === 'number' && estimate > 0 ? { estimateHours: jiraHours(estimate) } : {}),
       dueDate: f.duedate ?? null,
       project: existing?.project ?? null,
       tags: f.labels ?? [],

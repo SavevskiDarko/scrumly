@@ -140,9 +140,11 @@ export async function pullTeam(teamId: ID, bridge = jiraBridge()): Promise<PullO
       .slice(-CLOSED_SPRINTS_KEPT)
     const sprints = [...closed, ...own.filter((s) => s.state === 'active'), ...own.filter((s) => s.state === 'future')]
 
+    // Original estimate is asked for whatever the board estimates in: it is the
+    // hours Team capacity books, and a points board can still have them.
     const pointsField = config.estimation?.field?.fieldId
-    const fields = ['summary', 'description', 'status', 'assignee', 'priority', 'duedate', 'labels',
-      'created', 'updated', 'sprint', 'closedSprints', ...(pointsField ? [pointsField] : [])].join(',')
+    const fields = [...new Set(['summary', 'description', 'status', 'assignee', 'priority', 'duedate', 'labels',
+      'created', 'updated', 'sprint', 'closedSprints', 'timeoriginalestimate', ...(pointsField ? [pointsField] : [])])].join(',')
 
     let issues: JiraIssue[] = []
     for (const s of sprints) {
